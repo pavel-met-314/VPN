@@ -1,0 +1,23 @@
+---
+alwaysApply: true
+---
+
+# Project: VPN
+
+## General rules
+- All changes require my explicit confirmation.
+- Before any `git commit`, show the diff and ask "Commit? (yes/no)".
+- Do not execute firewall/iptables commands without warning me first.
+
+## Security
+- Never output real passwords, keys, or tokens in the response.
+- Do not generate `curl | bash` scripts without showing the full content first.
+- The 3X-UI panel must listen only on 127.0.0.1 (not 0.0.0.0).
+
+## Planning (Plan mode)
+- In Plan mode: first ask 3–5 clarifying questions, then produce the final plan.
+- The plan must contain high-level stages, not low-level commands (commands come later, on request).
+
+## Commits
+- A meaningful change = editing configs, docker-compose, nginx, adding a user.
+- After each such change → ask for commit approval.
