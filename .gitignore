@@ -1,0 +1,19 @@
+# Секреты — никогда не коммитить
+.env
+*.pem
+*.key
+id_rsa
+id_ed25519
+secrets/
+server-info.local.md
+
+# Бэкапы с сервера
+backups/
+*.tar.gz
+*.sql
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
