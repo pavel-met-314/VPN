@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VPN — {{ user.display_name }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <main class="card">
+      <div class="topbar">
+        <div>
+          <h1>Привет, {{ user.display_name }}</h1>
+          <p class="muted">Профиль: {{ client.email }}</p>
+        </div>
+        <form method="post" action="/portal/logout">
+          <button type="submit" class="secondary">Выйти</button>
+        </form>
+      </div>
+
+      <img class="qr" src="{{ qr_data_url }}" alt="QR-код VPN">
+
+      <h2>Ссылка vless</h2>
+      <textarea class="code" id="vless-link" readonly>{{ client.vless_link }}</textarea>
+      <p style="margin-top:0.75rem">
+        <button type="button" onclick="copyLink()">Скопировать ссылку</button>
+      </p>
+
+      <h2>Как подключить</h2>
+      <ol>
+        <li>Android: v2rayNG → «+» → сканировать QR или импорт из буфера.</li>
+        <li>iPhone: Streisand / FoXray → Scan QR.</li>
+        <li>Windows: Clash Verge Rev или v2rayN → импорт ссылки.</li>
+        <li>Проверка: открой <a href="https://2ip.ru" target="_blank" rel="noopener">2ip.ru</a> — IP должен быть сервера VPN.</li>
+      </ol>
+
+      <p class="muted" style="margin-top:1rem">
+        Подробная инструкция: спроси у админа файл <code>clients-family.txt</code>.
+      </p>
+    </main>
+    <footer>Не публикуй ссылку и QR в чатах.</footer>
+  </div>
+
+  <script>
+    function copyLink() {
+      const el = document.getElementById('vless-link');
+      el.select();
+      el.setSelectionRange(0, 99999);
+      navigator.clipboard.writeText(el.value);
+    }
+  </script>
+</body>
+</html>

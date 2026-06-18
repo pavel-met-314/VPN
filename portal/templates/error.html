@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VPN — ошибка</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <main class="card">
+      <h1>Ошибка конфигурации</h1>
+      <div class="error">{{ message }}</div>
+      <p class="muted">Напиши админу VPN. Твой логин: {{ user.display_name }} ({{ user.client_email }}).</p>
+      <form method="post" action="/portal/logout" style="margin-top:1rem">
+        <button type="submit" class="secondary">Выйти</button>
+      </form>
+    </main>
+  </div>
+</body>
+</html>

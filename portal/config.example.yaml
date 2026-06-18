@@ -1,0 +1,30 @@
+# Скопируй на VPS: /etc/family-portal/config.yaml
+# chmod 600, владелец family-portal
+
+server:
+  host: 127.0.0.1
+  port: 3180
+
+# Публичный адрес в vless-ссылках (НЕ localhost)
+public_address: 2.26.9.208
+
+# Секрет для подписи сессий — сгенерируй: openssl rand -hex 32
+session_secret: CHANGE_ME_RANDOM_64_HEX
+
+# Путь к БД 3X-UI (read-only)
+xui_db_path: /etc/x-ui/x-ui.db
+
+# Inbound по remark в панели
+inbound_remark: family-reality
+
+# Пользователи портала → клиенты 3X-UI (поле Email в панели)
+users:
+  - username: ivan
+    password_hash: "$2b$12$..."   # scripts/05-family-portal-hash.py
+    client_email: user01
+    display_name: Иван
+
+  - username: maria
+    password_hash: "$2b$12$..."
+    client_email: user02
+    display_name: Мария

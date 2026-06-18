@@ -14,7 +14,7 @@
 | 3 | [03-xui-reality.md](docs/stages/03-xui-reality.md) | [`scripts/03-bind-panel-localhost.sh`](scripts/03-bind-panel-localhost.sh) |
 | 4 | [04-nginx-le.md](docs/stages/04-nginx-le.md) | [`scripts/04-nginx-certbot.sh`](scripts/04-nginx-certbot.sh) |
 | 5 | [05-admin.md](docs/stages/05-admin.md) | — |
-| 6 | [06-distribution.md](docs/stages/06-distribution.md), [clients.md](docs/clients.md) | — |
+| 6 | [06-distribution.md](docs/stages/06-distribution.md), [06-portal.md](docs/stages/06-portal.md), [clients-family.txt](docs/clients-family.txt) | [`scripts/05-family-portal.sh`](scripts/05-family-portal.sh) |
 | 7 | [07-ops.md](docs/stages/07-ops.md), [setup.md](docs/setup.md), [update.md](docs/update.md), [backup.md](docs/backup.md) | [`scripts/07-backup.sh`](scripts/07-backup.sh), [`scripts/07-smoke-test.sh`](scripts/07-smoke-test.sh) |
 
 ## Безопасность
@@ -33,5 +33,6 @@ docs/
   update.md     # обновления
   backup.md     # бэкапы
 scripts/        # вспомогательные скрипты для VPS
+portal/         # веб-портал выдачи vless (FastAPI)
 templates/      # nginx, статическая заглушка
 ```

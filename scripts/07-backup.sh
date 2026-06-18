@@ -20,6 +20,7 @@ copy_if_exists() {
 }
 
 copy_if_exists /etc/x-ui "${TMP}/etc/x-ui"
+copy_if_exists /etc/family-portal/config.yaml "${TMP}/etc/family-portal/config.yaml"
 copy_if_exists /etc/nginx/sites-available/vpn-landing "${TMP}/etc/nginx/sites-available/vpn-landing"
 copy_if_exists /var/www/vpn-landing "${TMP}/var/www/vpn-landing"
 copy_if_exists /etc/letsencrypt "${TMP}/etc/letsencrypt"

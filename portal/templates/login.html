@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VPN — вход</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <main class="card">
+      <h1>Семейный VPN</h1>
+      <p class="muted">Войди, чтобы получить свою ссылку и QR-код.</p>
+
+      {% if error %}
+      <div class="error">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/portal/login">
+        <label for="username">Логин</label>
+        <input id="username" name="username" type="text" autocomplete="username" required>
+
+        <label for="password">Пароль</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+        <button type="submit">Войти</button>
+      </form>
+    </main>
+    <footer>Не передавай логин и пароль другим людям.</footer>
+  </div>
+</body>
+</html>
