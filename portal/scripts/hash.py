@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import getpass
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from passlib.context import CryptContext
 
-from app.auth import hash_password  # noqa: E402
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def main() -> int:
@@ -24,7 +23,7 @@ def main() -> int:
         print("Минимум 8 символов", file=sys.stderr)
         return 1
 
-    print(hash_password(password))
+    print(pwd_context.hash(password))
     return 0
 
 

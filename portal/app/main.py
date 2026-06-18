@@ -114,12 +114,12 @@ def logout() -> RedirectResponse:
     return redirect
 
 
-@app.get("/portal/", response_class=HTMLResponse)
+@app.get("/portal/", response_class=HTMLResponse, response_model=None)
 def dashboard(
     request: Request,
     config: AppConfig = Depends(get_config),
     serializer: URLSafeTimedSerializer = Depends(get_serializer),
-) -> HTMLResponse | RedirectResponse:
+) -> Response:
     user = resolve_user(request, config, serializer)
     if user is None:
         return RedirectResponse(url="/portal/login", status_code=303)
