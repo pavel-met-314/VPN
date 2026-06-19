@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -23,7 +24,7 @@ from app.auth import (
     verify_password,
 )
 from app.config import AppConfig, PortalUser, load_config
-from app.xui_db import XuiDatabase
+from app.xui_db import ClientLink, ClientTraffic, XuiDatabase
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = Path(os.environ.get("FAMILY_PORTAL_CONFIG", "/etc/family-portal/config.yaml"))
@@ -53,11 +54,41 @@ def resolve_user(
 
 
 def make_qr_data_url(text: str) -> str:
+    encoded = base64.b64encode(make_qr_png_bytes(text)).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def make_qr_png_bytes(text: str) -> bytes:
     img = qrcode.make(text, box_size=6, border=2)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
-    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
+    return buf.getvalue()
+
+
+def now_local_str() -> str:
+    return datetime.now(timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M:%S")
+
+
+def require_user(
+    request: Request,
+    config: AppConfig,
+    serializer: URLSafeTimedSerializer,
+) -> PortalUser | RedirectResponse:
+    user = resolve_user(request, config, serializer)
+    if user is None:
+        return RedirectResponse(url="/portal/login", status_code=303)
+    return user
+
+
+def load_client_data(config: AppConfig, user: PortalUser) -> tuple[ClientLink, ClientTraffic | None]:
+    db = XuiDatabase(config.xui_db_path)
+    client = db.get_client_link(
+        inbound_remark=config.inbound_remark,
+        client_email=user.client_email,
+        public_address=config.public_address,
+    )
+    traffic = db.get_client_traffic(user.client_email)
+    return client, traffic
 
 
 @app.get("/health")
@@ -117,19 +148,17 @@ def logout() -> RedirectResponse:
 @app.get("/portal/", response_class=HTMLResponse, response_model=None)
 def dashboard(
     request: Request,
+    refresh: int | None = None,
     config: AppConfig = Depends(get_config),
     serializer: URLSafeTimedSerializer = Depends(get_serializer),
 ) -> Response:
-    user = resolve_user(request, config, serializer)
-    if user is None:
-        return RedirectResponse(url="/portal/login", status_code=303)
-    db = XuiDatabase(config.xui_db_path)
+    user_or_redirect = require_user(request, config, serializer)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+
     try:
-        client = db.get_client_link(
-            inbound_remark=config.inbound_remark,
-            client_email=user.client_email,
-            public_address=config.public_address,
-        )
+        client, traffic = load_client_data(config, user)
     except LookupError as exc:
         return templates.TemplateResponse(
             request,
@@ -147,6 +176,33 @@ def dashboard(
         {
             "user": user,
             "client": client,
+            "traffic": traffic,
             "qr_data_url": make_qr_data_url(client.vless_link),
+            "updated_at": now_local_str(),
+            "just_refreshed": refresh == 1,
         },
+    )
+
+
+@app.get("/portal/qr.png")
+def download_qr(
+    request: Request,
+    config: AppConfig = Depends(get_config),
+    serializer: URLSafeTimedSerializer = Depends(get_serializer),
+) -> Response:
+    user_or_redirect = require_user(request, config, serializer)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+
+    try:
+        client, _ = load_client_data(config, user)
+    except LookupError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    filename = f"vpn-{user.client_email}.png"
+    return Response(
+        content=make_qr_png_bytes(client.vless_link),
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

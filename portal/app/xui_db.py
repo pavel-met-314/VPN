@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,56 @@ class ClientLink:
     uuid: str
     port: int
     vless_link: str
+
+
+@dataclass(frozen=True)
+class ClientTraffic:
+    up: int
+    down: int
+    total_limit: int
+    expiry_time: int
+    last_online: int
+
+    @property
+    def used(self) -> int:
+        return self.up + self.down
+
+    @property
+    def used_human(self) -> str:
+        return format_bytes(self.used)
+
+    @property
+    def up_human(self) -> str:
+        return format_bytes(self.up)
+
+    @property
+    def down_human(self) -> str:
+        return format_bytes(self.down)
+
+    @property
+    def limit_human(self) -> str | None:
+        if self.total_limit <= 0:
+            return None
+        return format_bytes(self.total_limit)
+
+    @property
+    def last_online_human(self) -> str | None:
+        if self.last_online <= 0:
+            return None
+        ts = self.last_online / 1000 if self.last_online > 10_000_000_000 else self.last_online
+        return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M")
+
+
+def format_bytes(value: int) -> str:
+    units = ("B", "KB", "MB", "GB", "TB")
+    size = float(max(value, 0))
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{value} B"
 
 
 class XuiDatabase:
@@ -96,4 +147,30 @@ class XuiDatabase:
             uuid=uuid,
             port=port,
             vless_link=link,
+        )
+
+    def get_client_traffic(self, client_email: str) -> ClientTraffic | None:
+        with self._connect() as conn:
+            try:
+                row = conn.execute(
+                    """
+                    SELECT up, down, total, expiry_time, last_online
+                    FROM client_traffics
+                    WHERE email = ?
+                    LIMIT 1
+                    """,
+                    (client_email,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                return None
+
+        if row is None:
+            return None
+
+        return ClientTraffic(
+            up=int(row["up"] or 0),
+            down=int(row["down"] or 0),
+            total_limit=int(row["total"] or 0),
+            expiry_time=int(row["expiry_time"] or 0),
+            last_online=int(row["last_online"] or 0),
         )

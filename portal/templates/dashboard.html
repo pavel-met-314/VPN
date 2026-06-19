@@ -19,12 +19,39 @@
         </form>
       </div>
 
+      {% if just_refreshed %}
+      <div class="notice">Конфиг перечитан из панели.</div>
+      {% endif %}
+
+      <p class="muted">Обновлено: {{ updated_at }}</p>
+
+      <div class="btn-row">
+        <a class="btn" href="/portal/qr.png" download="vpn-{{ client.email }}.png">Скачать QR</a>
+        <a class="btn secondary" href="/portal/?refresh=1">Обновить конфиг</a>
+      </div>
+
       <img class="qr" src="{{ qr_data_url }}" alt="QR-код VPN">
+
+      <h2>Трафик</h2>
+      {% if traffic %}
+      <ul class="stats">
+        <li><strong>Всего:</strong> {{ traffic.used_human }}</li>
+        <li><strong>Отдача:</strong> {{ traffic.up_human }}</li>
+        <li><strong>Загрузка:</strong> {{ traffic.down_human }}</li>
+        <li><strong>Лимит:</strong> {{ traffic.limit_human or "без лимита" }}</li>
+        {% if traffic.last_online_human %}
+        <li><strong>Последний онлайн:</strong> {{ traffic.last_online_human }}</li>
+        {% endif %}
+      </ul>
+      {% else %}
+      <p class="muted">Статистика пока недоступна.</p>
+      {% endif %}
 
       <h2>Ссылка vless</h2>
       <textarea class="code" id="vless-link" readonly>{{ client.vless_link }}</textarea>
-      <p style="margin-top:0.75rem">
-        <button type="button" onclick="copyLink()">Скопировать ссылку</button>
+      <p class="btn-row">
+        <button type="button" id="copy-btn" onclick="copyLink()">Скопировать ссылку</button>
+        <span id="copy-status" class="muted"></span>
       </p>
 
       <h2>Как подключить</h2>
@@ -43,11 +70,33 @@
   </div>
 
   <script>
-    function copyLink() {
+    function setCopyStatus(msg) {
+      document.getElementById('copy-status').textContent = msg;
+    }
+
+    async function copyLink() {
       const el = document.getElementById('vless-link');
+      const text = el.value;
+
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopyStatus('Скопировано');
+          return;
+        } catch (e) {}
+      }
+
+      el.focus();
       el.select();
-      el.setSelectionRange(0, 99999);
-      navigator.clipboard.writeText(el.value);
+      el.setSelectionRange(0, text.length);
+      try {
+        if (document.execCommand('copy')) {
+          setCopyStatus('Скопировано');
+          return;
+        }
+      } catch (e) {}
+
+      setCopyStatus('Выделено — нажми Ctrl+C (или долгий тап → Копировать)');
     }
   </script>
 </body>

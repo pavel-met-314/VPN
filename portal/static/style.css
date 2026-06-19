@@ -64,8 +64,41 @@ button, .btn {
   text-decoration: none;
 }
 
-button.secondary {
+button.secondary, a.btn.secondary {
   background: #6b7280;
+}
+
+a.btn {
+  color: #fff;
+}
+
+.notice {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.75rem 0 1rem;
+}
+
+.stats {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 1rem;
+}
+
+.stats li {
+  padding: 0.35rem 0;
+  color: var(--text);
 }
 
 .error {
