@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -69,6 +70,78 @@ def now_local_str() -> str:
     return datetime.now(timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M:%S")
 
 
+def get_hiddify_options() -> dict:
+    # Эти настройки были проверены на LTE/4G (Hiddify) как рабочие.
+    return {
+        "region": "ru",
+        "balancer-strategy": "round-robin",
+        "block-ads": False,
+        "use-xray-core-when-possible": False,
+        "execute-config-as-is": False,
+        "log-level": "warn",
+        "resolve-destination": False,
+        "ipv6-mode": "ipv4_only",
+        "remote-dns-address": "https://dns.cloudflare.com/dns-query",
+        "remote-dns-domain-strategy": "ipv4_only",
+        "direct-dns-address": "1.1.1.1",
+        "direct-dns-domain-strategy": "",
+        "mixed-port": 12334,
+        "tproxy-port": 12335,
+        "direct-port": 12337,
+        "redirect-port": 12336,
+        "tun-implementation": "gvisor",
+        "mtu": 1500,
+        "strict-route": True,
+        "connection-test-url": "http://captive.apple.com/hotspot-detect.html",
+        "url-test-interval": 600,
+        "enable-clash-api": True,
+        "clash-api-port": 16756,
+        "enable-tun": True,
+        "set-system-proxy": False,
+        "bypass-lan": False,
+        "allow-connection-from-lan": False,
+        "enable-fake-dns": False,
+        "independent-dns-cache": True,
+        "rules": [],
+        "tls-tricks": {
+            "enable-fragment": False,
+            "fragment-size": "10-30",
+            "fragment-sleep": "2-8",
+            "mixed-sni-case": False,
+            "enable-padding": False,
+            "padding-size": "1-1500",
+        },
+        "warp": {
+            "enable": False,
+            "mode": "warp_over_proxy",
+            "wireguard-config": "",
+            "license-key": "",
+            "account-id": "",
+            "access-token": "",
+            "clean-ip": "auto",
+            "clean-port": 0,
+            "noise": "1-3",
+            "noise-size": "10-30",
+            "noise-delay": "10-30",
+            "noise-mode": "m4",
+        },
+        "warp2": {
+            "enable": False,
+            "mode": "warp_over_proxy",
+            "wireguard-config": "",
+            "license-key": "",
+            "account-id": "",
+            "access-token": "",
+            "clean-ip": "auto",
+            "clean-port": 0,
+            "noise": "1-3",
+            "noise-size": "10-30",
+            "noise-delay": "10-30",
+            "noise-mode": "m4",
+        },
+    }
+
+
 def require_user(
     request: Request,
     config: AppConfig,
@@ -80,10 +153,14 @@ def require_user(
     return user
 
 
+def resolve_inbound_remark(config: AppConfig, user: PortalUser) -> str:
+    return user.inbound_remark or config.inbound_remark
+
+
 def load_client_data(config: AppConfig, user: PortalUser) -> tuple[ClientLink, ClientTraffic | None]:
     db = XuiDatabase(config.xui_db_path)
     client = db.get_client_link(
-        inbound_remark=config.inbound_remark,
+        inbound_remark=resolve_inbound_remark(config, user),
         client_email=user.client_email,
         public_address=config.public_address,
     )
@@ -205,4 +282,25 @@ def download_qr(
         content=make_qr_png_bytes(client.vless_link),
         media_type="image/png",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/portal/hiddify/options.json")
+def download_hiddify_options(
+    request: Request,
+    config: AppConfig = Depends(get_config),
+    serializer: URLSafeTimedSerializer = Depends(get_serializer),
+) -> Response:
+    user_or_redirect = require_user(request, config, serializer)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+
+    content = json.dumps(get_hiddify_options(), ensure_ascii=False, indent=2).encode("utf-8")
+    return Response(
+        content=content,
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="hiddify-options.json"',
+            "Cache-Control": "no-store",
+        },
     )

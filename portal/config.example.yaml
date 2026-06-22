@@ -28,3 +28,10 @@ users:
     password_hash: "$2b$12$..."
     client_email: user02
     display_name: Мария
+
+  # Клиент в другом inbound (клон для 4G / другой порт) — укажи remark из панели:
+  # - username: user05
+  #   password_hash: "$2b$12$..."
+  #   client_email: user05
+  #   display_name: ...
+  #   inbound_remark: family-reality-2053

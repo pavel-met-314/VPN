@@ -13,6 +13,7 @@ class PortalUser:
     password_hash: str
     client_email: str
     display_name: str
+    inbound_remark: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ def load_config(path: str | Path) -> AppConfig:
             password_hash=item["password_hash"],
             client_email=item["client_email"],
             display_name=item.get("display_name", item["username"]),
+            inbound_remark=item.get("inbound_remark"),
         )
         users[user.username] = user
 

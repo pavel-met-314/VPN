@@ -28,6 +28,7 @@
       <div class="btn-row">
         <a class="btn" href="/portal/qr.png" download="vpn-{{ client.email }}.png">Скачать QR</a>
         <a class="btn secondary" href="/portal/?refresh=1">Обновить конфиг</a>
+        <a class="btn secondary" href="/portal/hiddify/options.json" download="hiddify-options.json">Hiddify options.json</a>
       </div>
 
       <img class="qr" src="{{ qr_data_url }}" alt="QR-код VPN">
@@ -57,6 +58,7 @@
       <h2>Как подключить</h2>
       <ol>
         <li>Android: v2rayNG → «+» → сканировать QR или импорт из буфера.</li>
+        <li>Если на 4G «подключено, но нет интернета»: поставь Hiddify и скачай <code>Hiddify options.json</code> выше.</li>
         <li>iPhone: Streisand / FoXray → Scan QR.</li>
         <li>Windows: Clash Verge Rev или v2rayN → импорт ссылки.</li>
         <li>Проверка: открой <a href="https://2ip.ru" target="_blank" rel="noopener">2ip.ru</a> — IP должен быть сервера VPN.</li>
