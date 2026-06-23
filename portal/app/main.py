@@ -4,11 +4,13 @@ import base64
 import io
 import json
 import os
+import urllib.parse
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
 import qrcode
+import yaml
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -140,6 +142,63 @@ def get_hiddify_options() -> dict:
             "noise-mode": "m4",
         },
     }
+
+
+def build_clash_yaml_from_vless_link(*, vless_link: str, profile_name: str) -> str:
+    split = urllib.parse.urlsplit(vless_link)
+    uuid = split.username or ""
+    host = split.hostname or ""
+    port = split.port or 443
+
+    query = urllib.parse.parse_qs(split.query)
+    params = {k: (v[0] if v else "") for k, v in query.items()}
+
+    proxy_name = profile_name.strip() or urllib.parse.unquote(split.fragment or "") or "VPN"
+
+    proxy: dict = {
+        "name": proxy_name,
+        "type": "vless",
+        "server": host,
+        "port": int(port),
+        "uuid": uuid,
+        "udp": True,
+        "network": params.get("type") or "tcp",
+        "tls": True,
+        "servername": params.get("sni") or host,
+        "client-fingerprint": params.get("fp") or "chrome",
+        "skip-cert-verify": True,
+        "encryption": params.get("encryption") or "",
+    }
+
+    flow = params.get("flow") or ""
+    if flow:
+        proxy["flow"] = flow
+
+    pbk = params.get("pbk") or ""
+    sid = params.get("sid") or ""
+    if pbk:
+        proxy["reality-opts"] = {"public-key": pbk}
+        if sid:
+            proxy["reality-opts"]["short-id"] = sid
+
+    cfg: dict = {
+        "mixed-port": 7890,
+        "allow-lan": False,
+        "mode": "rule",
+        "log-level": "info",
+        "ipv6": False,
+        "proxies": [proxy],
+        "proxy-groups": [
+            {
+                "name": "VPN",
+                "type": "select",
+                "proxies": [proxy_name, "DIRECT"],
+            }
+        ],
+        "rules": ["MATCH,VPN"],
+    }
+
+    return yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False)
 
 
 def require_user(
@@ -301,6 +360,34 @@ def download_hiddify_options(
         media_type="application/json; charset=utf-8",
         headers={
             "Content-Disposition": 'attachment; filename="hiddify-options.json"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.get("/portal/clash.yaml")
+def download_clash_yaml(
+    request: Request,
+    config: AppConfig = Depends(get_config),
+    serializer: URLSafeTimedSerializer = Depends(get_serializer),
+) -> Response:
+    user_or_redirect = require_user(request, config, serializer)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+
+    try:
+        client, _ = load_client_data(config, user)
+    except LookupError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    content = build_clash_yaml_from_vless_link(vless_link=client.vless_link, profile_name=f"vpn-{client.email}")
+    filename = f"vpn-{client.email}.yaml"
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="application/x-yaml; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "no-store",
         },
     )

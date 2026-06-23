@@ -29,6 +29,7 @@
         <a class="btn" href="/portal/qr.png" download="vpn-{{ client.email }}.png">Скачать QR</a>
         <a class="btn secondary" href="/portal/?refresh=1">Обновить конфиг</a>
         <a class="btn secondary" href="/portal/hiddify/options.json" download="hiddify-options.json">Hiddify options.json</a>
+        <a class="btn secondary" href="/portal/clash.yaml" download="vpn-{{ client.email }}.yaml">Clash YAML</a>
       </div>
 
       <img class="qr" src="{{ qr_data_url }}" alt="QR-код VPN">
@@ -59,6 +60,8 @@
       <ol>
         <li>Android: v2rayNG → «+» → сканировать QR или импорт из буфера.</li>
         <li>Если на 4G «подключено, но нет интернета»: поставь Hiddify и скачай <code>Hiddify options.json</code> выше.</li>
+        <li>Hiddify импорт JSON: <strong>Настройки</strong> (справа внизу) → <strong>3 точки</strong> → <strong>Импорт</strong> → <strong>Импортировать настройки из файла</strong>.</li>
+        <li>Если добавляешь через файл: скачай <code>Clash YAML</code> (Mihomo/Clash Verge Rev) и импортируй как профиль.</li>
         <li>iPhone: Streisand / FoXray → Scan QR.</li>
         <li>Windows: Clash Verge Rev или v2rayN → импорт ссылки.</li>
         <li>Проверка: открой <a href="https://2ip.ru" target="_blank" rel="noopener">2ip.ru</a> — IP должен быть сервера VPN.</li>
