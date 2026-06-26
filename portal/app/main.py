@@ -20,6 +20,7 @@ from itsdangerous import URLSafeTimedSerializer
 from app.auth import (
     SESSION_COOKIE,
     SESSION_MAX_AGE,
+    SESSION_REMEMBER_MAX_AGE,
     check_rate_limit,
     create_session_token,
     get_portal_user,
@@ -247,6 +248,7 @@ def login_submit(
     response: Response,
     username: str = Form(...),
     password: str = Form(...),
+    remember: str | None = Form(None),
     config: AppConfig = Depends(get_config),
     serializer: URLSafeTimedSerializer = Depends(get_serializer),
 ) -> Response:
@@ -260,12 +262,14 @@ def login_submit(
             status_code=401,
         )
 
-    token = create_session_token(serializer, user.username)
+    remember_me = remember in ("on", "true", "1", "yes")
+    token = create_session_token(serializer, user.username, remember=remember_me)
+    cookie_max_age = SESSION_REMEMBER_MAX_AGE if remember_me else SESSION_MAX_AGE
     redirect = RedirectResponse(url="/portal/", status_code=303)
     redirect.set_cookie(
         key=SESSION_COOKIE,
         value=token,
-        max_age=SESSION_MAX_AGE,
+        max_age=cookie_max_age,
         httponly=True,
         samesite="lax",
         secure=request.url.scheme == "https",

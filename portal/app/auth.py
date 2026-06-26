@@ -13,6 +13,7 @@ from app.config import AppConfig, PortalUser
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SESSION_COOKIE = "family_portal_session"
 SESSION_MAX_AGE = 60 * 60 * 12  # 12 часов
+SESSION_REMEMBER_MAX_AGE = 60 * 60 * 24 * 30  # 30 дней
 
 _login_attempts: dict[str, Deque[float]] = defaultdict(deque)
 MAX_ATTEMPTS = 5
@@ -47,8 +48,16 @@ def check_rate_limit(request: Request) -> None:
     attempts.append(now)
 
 
-def create_session_token(serializer: URLSafeTimedSerializer, username: str) -> str:
-    return serializer.dumps({"u": username})
+def create_session_token(
+    serializer: URLSafeTimedSerializer,
+    username: str,
+    *,
+    remember: bool = False,
+) -> str:
+    payload: dict[str, str | bool] = {"u": username}
+    if remember:
+        payload["r"] = True
+    return serializer.dumps(payload)
 
 
 def read_session_user(serializer: URLSafeTimedSerializer, token: str | None) -> str | None:
@@ -56,7 +65,14 @@ def read_session_user(serializer: URLSafeTimedSerializer, token: str | None) -> 
         return None
     try:
         data = serializer.loads(token, max_age=SESSION_MAX_AGE)
-    except (BadSignature, SignatureExpired):
+    except SignatureExpired:
+        try:
+            data = serializer.loads(token, max_age=SESSION_REMEMBER_MAX_AGE)
+        except (BadSignature, SignatureExpired):
+            return None
+        if not data.get("r"):
+            return None
+    except BadSignature:
         return None
     username = data.get("u")
     return username if isinstance(username, str) else None
