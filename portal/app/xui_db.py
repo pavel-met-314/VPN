@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from app.vless import build_vless_link, parse_json_field
+
+GMT3 = timezone(timedelta(hours=3))
 
 
 @dataclass(frozen=True)
@@ -53,7 +55,19 @@ class ClientTraffic:
         if self.last_online <= 0:
             return None
         ts = self.last_online / 1000 if self.last_online > 10_000_000_000 else self.last_online
-        return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M")
+        return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(GMT3).strftime("%d.%m.%Y %H:%M")
+
+    @property
+    def expiry_human(self) -> str:
+        if self.expiry_time <= 0:
+            return "без срока"
+        return datetime.fromtimestamp(self.expiry_time / 1000, tz=GMT3).strftime("%d.%m.%Y %H:%M")
+
+    @property
+    def is_expired(self) -> bool:
+        if self.expiry_time <= 0:
+            return False
+        return self.expiry_time <= int(datetime.now(GMT3).timestamp() * 1000)
 
 
 def format_bytes(value: int) -> str:

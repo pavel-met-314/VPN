@@ -24,6 +24,10 @@ body {
   padding: 2rem 1rem;
 }
 
+.wrap-wide {
+  max-width: 960px;
+}
+
 .card {
   background: var(--card);
   border-radius: 12px;
@@ -98,6 +102,10 @@ a.btn {
   font-size: 0.9rem;
 }
 
+.danger {
+  color: var(--danger);
+}
+
 .btn-row {
   display: flex;
   flex-wrap: wrap;
@@ -163,4 +171,53 @@ footer {
   font-size: 0.85rem;
   color: var(--muted);
   text-align: center;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin: 1rem 0 1.25rem;
+}
+
+.filter-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.filter-row select {
+  min-width: 10rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin: 0.5rem 0 1.25rem;
+}
+
+.data-table th,
+.data-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.4rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.data-table th {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.data-table td {
+  color: var(--muted);
+  word-break: break-word;
 }

@@ -19,11 +19,59 @@
         </form>
       </div>
 
+      {% if is_admin %}
+      <p class="btn-row">
+        <a class="btn secondary" href="/portal/admin/visits">Статистика посещений</a>
+      </p>
+      {% endif %}
+
       {% if just_refreshed %}
       <div class="notice">Конфиг перечитан из панели.</div>
       {% endif %}
 
       <p class="muted">Обновлено: {{ updated_at }}</p>
+
+      {% if telegram_enabled %}
+      <h2>Оплата</h2>
+      {% if traffic %}
+      <p class="muted">
+        Оплачено до: <strong>{{ traffic.expiry_human }}</strong>
+        {% if traffic.is_expired %}<span class="danger"> (истекло)</span>{% endif %}
+      </p>
+      {% endif %}
+      <p class="muted">Тариф: {{ payment_amount_rub }} ₽ / {{ payment_days }} дн.</p>
+      {% if telegram_linked %}
+      <p class="muted">Telegram подключён — открой бота @{{ telegram_bot_username }} → «Статус» или «Я оплатил».</p>
+      {% else %}
+      <form method="post" action="/portal/telegram/link">
+        <button type="submit">Привязать Telegram</button>
+      </form>
+      {% endif %}
+      {% if telegram_link_url %}
+      <p class="muted">Ссылка действует 15 мин — открой в Telegram:</p>
+      <textarea class="code" id="telegram-link-url" readonly>{{ telegram_link_url }}</textarea>
+      <p class="btn-row">
+        <button type="button" onclick="copyFromField('telegram-link-url', 'copy-tg-status')">Скопировать ссылку</button>
+        <a class="btn secondary" href="{{ telegram_link_url }}">Открыть в Telegram</a>
+        <span id="copy-tg-status" class="muted"></span>
+      </p>
+      {% endif %}
+      {% endif %}
+
+      <h2>Clash Verge Rev (Windows / Android)</h2>
+      <p class="muted">RU напрямую, остальное через VPN.</p>
+      <textarea class="code" id="clash-profile-url" readonly>{{ clash_profile_url }}</textarea>
+      <p class="btn-row">
+        <button type="button" onclick="copyFromField('clash-profile-url', 'copy-clash-status')">Скопировать ссылку профиля</button>
+        <span id="copy-clash-status" class="muted"></span>
+      </p>
+
+      <h2>Hiddify (Android)</h2>
+      <textarea class="code" id="hiddify-sub-url" readonly>{{ hiddify_subscription_url }}</textarea>
+      <p class="btn-row">
+        <button type="button" onclick="copyFromField('hiddify-sub-url', 'copy-hiddify-status')">Скопировать ссылку подписки</button>
+        <span id="copy-hiddify-status" class="muted"></span>
+      </p>
 
       <div class="btn-row">
         <a class="btn" href="/portal/qr.png" download="vpn-{{ client.email }}.png">Скачать QR</a>
@@ -58,35 +106,31 @@
 
       <h2>Как подключить</h2>
       <ol>
-        <li>Android: v2rayNG → «+» → сканировать QR или импорт из буфера.</li>
+        <li><strong>Clash Verge Rev:</strong> Remote-профиль по ссылке выше → режим <strong>Rule</strong>.</li>
+        <li><strong>Hiddify:</strong> подписка по второй ссылке выше.</li>
         <li>Если на 4G «подключено, но нет интернета»: поставь Hiddify и скачай <code>Hiddify options.json</code> выше.</li>
         <li>Hiddify импорт JSON: <strong>Настройки</strong> (справа внизу) → <strong>3 точки</strong> → <strong>Импорт</strong> → <strong>Импортировать настройки из файла</strong>.</li>
-        <li>Если добавляешь через файл: скачай <code>Clash YAML</code> (Mihomo/Clash Verge Rev) и импортируй как профиль.</li>
-        <li>iPhone: Streisand / FoXray → Scan QR.</li>
-        <li>Windows: Clash Verge Rev или v2rayN → импорт ссылки.</li>
-        <li>Проверка: открой <a href="https://2ip.ru" target="_blank" rel="noopener">2ip.ru</a> — IP должен быть сервера VPN.</li>
+        <li>Проверка: <a href="https://2ip.ru" target="_blank" rel="noopener">2ip.ru</a> — домашний IP; <a href="https://ifconfig.me" target="_blank" rel="noopener">ifconfig.me</a> — IP Финляндии.</li>
+        <li>Запасной вариант: QR / vless — v2rayNG, Streisand, FoXray (без split).</li>
       </ol>
 
       <p class="muted" style="margin-top:1rem">
-        Подробная инструкция: спроси у админа файл <code>clients-family.txt</code>.
+        Не публикуй ссылки и QR в чатах — это полный доступ к твоему VPN.
       </p>
     </main>
-    <footer>Не публикуй ссылку и QR в чатах.</footer>
+    <footer>Не публикуй ссылки и QR в чатах.</footer>
   </div>
 
   <script>
-    function setCopyStatus(msg) {
-      document.getElementById('copy-status').textContent = msg;
-    }
-
-    async function copyLink() {
-      const el = document.getElementById('vless-link');
+    async function copyFromField(fieldId, statusId) {
+      const el = document.getElementById(fieldId);
+      const status = document.getElementById(statusId);
       const text = el.value;
 
       if (navigator.clipboard && window.isSecureContext) {
         try {
           await navigator.clipboard.writeText(text);
-          setCopyStatus('Скопировано');
+          status.textContent = 'Скопировано';
           return;
         } catch (e) {}
       }
@@ -96,12 +140,16 @@
       el.setSelectionRange(0, text.length);
       try {
         if (document.execCommand('copy')) {
-          setCopyStatus('Скопировано');
+          status.textContent = 'Скопировано';
           return;
         }
       } catch (e) {}
 
-      setCopyStatus('Выделено — нажми Ctrl+C (или долгий тап → Копировать)');
+      status.textContent = 'Выделено — нажми Ctrl+C (или долгий тап → Копировать)';
+    }
+
+    function copyLink() {
+      copyFromField('vless-link', 'copy-status');
     }
   </script>
 </body>

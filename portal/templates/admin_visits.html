@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VPN — статистика</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap wrap-wide">
+    <main class="card">
+      <div class="topbar">
+        <div>
+          <h1>Статистика посещений</h1>
+          <p class="muted">Сводка по доменам (не полные URL). Хранение: {{ retention_days }} дн.</p>
+        </div>
+        <a class="btn secondary" href="/portal/">Назад</a>
+      </div>
+
+      <p class="muted">Сбор логов: <strong>{{ log_status }}</strong>. Обновлено: {{ updated_at }}</p>
+
+      <form class="filter-row" method="get" action="/portal/admin/visits">
+        <label>
+          Период
+          <select name="days">
+            <option value="1" {% if days == 1 %}selected{% endif %}>1 день</option>
+            <option value="7" {% if days == 7 %}selected{% endif %}>7 дней</option>
+            <option value="14" {% if days == 14 %}selected{% endif %}>14 дней</option>
+            <option value="30" {% if days == 30 %}selected{% endif %}>30 дней</option>
+          </select>
+        </label>
+        <label>
+          Пользователь
+          <select name="client">
+            <option value="">Все</option>
+            {% for email, name in client_options %}
+            <option value="{{ email }}" {% if selected_client == email %}selected{% endif %}>{{ name }} ({{ email }})</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Показать</button>
+      </form>
+
+      <h2>Топ доменов</h2>
+      {% if top_hosts %}
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Пользователь</th>
+            <th>Домен</th>
+            <th>Запросов</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in top_hosts %}
+          <tr>
+            <td>{{ display_names.get(row.client_email, row.client_email) }}</td>
+            <td>{{ row.host }}</td>
+            <td>{{ row.hit_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">Пока нет данных. Проверь access.log Xray и поле Email у клиентов в 3X-UI.</p>
+      {% endif %}
+
+      <h2>По дням</h2>
+      {% if summary %}
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>День</th>
+            <th>Пользователь</th>
+            <th>Домен</th>
+            <th>Запросов</th>
+            <th>Последний раз</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary %}
+          <tr>
+            <td>{{ row.day }}</td>
+            <td>{{ display_names.get(row.client_email, row.client_email) }}</td>
+            <td>{{ row.host }}</td>
+            <td>{{ row.hit_count }}</td>
+            <td>{{ row.last_seen_display }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">Нет записей за выбранный период.</p>
+      {% endif %}
+
+      <p class="muted" style="margin-top:1rem">
+        HTTPS скрывает путь страницы — видны в основном домены. Фоновые запросы приложений тоже попадают в статистику.
+      </p>
+    </main>
+  </div>
+</body>
+</html>

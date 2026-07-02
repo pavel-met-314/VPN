@@ -130,6 +130,78 @@ sudo ufw status
 sudo systemctl restart family-portal
 ```
 
+## 6b.8 Статистика посещений (admin)
+
+В `config.yaml`:
+
+```yaml
+visit_log:
+  enabled: true
+  access_log_path: /var/log/xray/access.log
+  db_path: /var/lib/family-portal/visits.db
+  retention_days: 30
+  admin_usernames:
+    - admin   # username из users, не client_email
+```
+
+В 3X-UI: **Panel Settings → Xray → Logs** — включи **Access log** (путь как в config).
+
+Права на VPS:
+
+```bash
+sudo mkdir -p /var/lib/family-portal
+sudo chown family-portal:family-portal /var/lib/family-portal
+sudo chmod 750 /var/lib/family-portal
+# если access.log не читается:
+sudo chmod o+r /var/log/xray/access.log
+```
+
+Страница: `/portal/admin/visits` (кнопка видна только admin).
+
+Логируются **домены** (SNI/sniffing), не полные URL на HTTPS.
+
+## 6b.9 Telegram-бот (оплата)
+
+1. Создай бота у [@BotFather](https://t.me/BotFather) → `/newbot` → сохрани **token**.
+2. Узнай свой `chat_id` у [@userinfobot](https://t.me/userinfobot).
+3. В `config.yaml`:
+
+```yaml
+telegram:
+  enabled: true
+  bot_token: "..."           # только на VPS, chmod 600
+  bot_username: "MyVpnBot"    # без @
+  admin_chat_ids: [123456789]
+  db_path: /var/lib/family-portal/bot.db
+  payment:
+    amount_rub: 400
+    days: 30
+    instructions: |
+      Переведи 400 ₽ по СБП на +7XXXXXXXXXX.
+      В комментарии: user05
+```
+
+4. Права для продления в 3X-UI (группа `x-ui` на сервере обычно **нет** — даём `family-portal`):
+
+```bash
+sudo chgrp family-portal /etc/x-ui /etc/x-ui/x-ui.db
+sudo chmod g+w /etc/x-ui /etc/x-ui/x-ui.db
+echo 'family-portal ALL=(root) NOPASSWD: /bin/systemctl restart x-ui' | sudo tee /etc/sudoers.d/family-portal-xui
+sudo chmod 440 /etc/sudoers.d/family-portal-xui
+```
+
+В `family-portal.service`: `ReadWritePaths=... /etc/x-ui` (каталог, не только файл — SQLite пишет `-wal` рядом).
+
+5. `sudo systemctl restart family-portal`
+
+**Сценарий:** портал → «Привязать Telegram» → в боте «Я оплатил» → админ жмёт **+30 дней**.
+
+| Симптом | Решение |
+|---------|---------|
+| Бот молчит | `journalctl -u family-portal -n 50`, проверь `bot_token` |
+| +30 дней не работает | права на `x-ui.db`, sudoers для `restart x-ui` |
+| Админ не видит заявки | `admin_chat_ids` = твой chat_id из @userinfobot |
+
 ## Troubleshooting
 
 | Симптом | Решение |

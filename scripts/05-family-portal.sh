@@ -47,14 +47,22 @@ python3 -m venv "${INSTALL_DIR}/venv"
 "${INSTALL_DIR}/venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt"
 
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"
+mkdir -p /var/lib/family-portal
+chown "${SERVICE_USER}:${SERVICE_USER}" /var/lib/family-portal
+chmod 750 /var/lib/family-portal
 
-# Доступ к БД 3X-UI (read-only)
-if getent group x-ui >/dev/null; then
-  usermod -aG x-ui "${SERVICE_USER}"
-fi
+# Доступ к БД 3X-UI: read для портала, write для Telegram-бота (продление expiry)
 if [[ -f /etc/x-ui/x-ui.db ]]; then
+  chgrp "${SERVICE_USER}" /etc/x-ui /etc/x-ui/x-ui.db 2>/dev/null || true
   chmod g+r /etc/x-ui/x-ui.db || true
-  chgrp x-ui /etc/x-ui/x-ui.db 2>/dev/null || true
+  chmod g+w /etc/x-ui /etc/x-ui/x-ui.db 2>/dev/null || true
+fi
+
+# Продление клиентов из Telegram-бота
+if [[ ! -f /etc/sudoers.d/family-portal-xui ]]; then
+  echo "family-portal ALL=(root) NOPASSWD: /bin/systemctl restart x-ui" >/etc/sudoers.d/family-portal-xui
+  chmod 440 /etc/sudoers.d/family-portal-xui
+  visudo -cf /etc/sudoers.d/family-portal-xui
 fi
 
 cat >/etc/systemd/system/${SERVICE_NAME}.service <<UNIT
@@ -72,11 +80,10 @@ Environment=FAMILY_PORTAL_CONFIG=${CONFIG_FILE}
 ExecStart=${INSTALL_DIR}/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 3180 --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=${INSTALL_DIR}
-ReadOnlyPaths=/etc/x-ui /etc/family-portal
+ReadWritePaths=${INSTALL_DIR} /var/lib/family-portal /etc/x-ui
+ReadOnlyPaths=/etc/family-portal /var/log/xray /var/log/x-ui
 
 [Install]
 WantedBy=multi-user.target

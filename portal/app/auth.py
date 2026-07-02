@@ -14,6 +14,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SESSION_COOKIE = "family_portal_session"
 SESSION_MAX_AGE = 60 * 60 * 12  # 12 часов
 SESSION_REMEMBER_MAX_AGE = 60 * 60 * 24 * 30  # 30 дней
+SUBSCRIPTION_SALT = "family-portal-sub-v1"
+SUBSCRIPTION_MAX_AGE = 60 * 60 * 24 * 365 * 5  # 5 лет
 
 _login_attempts: dict[str, Deque[float]] = defaultdict(deque)
 MAX_ATTEMPTS = 5
@@ -82,3 +84,22 @@ def get_portal_user(config: AppConfig, username: str | None) -> PortalUser | Non
     if not username:
         return None
     return config.users.get(username)
+
+
+def get_subscription_serializer(secret: str) -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(secret, salt=SUBSCRIPTION_SALT)
+
+
+def create_subscription_token(serializer: URLSafeTimedSerializer, username: str) -> str:
+    return serializer.dumps({"u": username})
+
+
+def read_subscription_user(serializer: URLSafeTimedSerializer, token: str) -> str | None:
+    if not token:
+        return None
+    try:
+        data = serializer.loads(token, max_age=SUBSCRIPTION_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
+    username = data.get("u")
+    return username if isinstance(username, str) else None

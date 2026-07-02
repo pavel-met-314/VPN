@@ -17,6 +17,30 @@ xui_db_path: /etc/x-ui/x-ui.db
 # Inbound по remark в панели
 inbound_remark: family-reality
 
+# Лог посещений (домены из access.log Xray) — только для admin_usernames
+visit_log:
+  enabled: true
+  access_log_path: /var/log/xray/access.log
+  db_path: /var/lib/family-portal/visits.db
+  retention_days: 30
+  admin_usernames:
+    - admin
+
+# Telegram-бот: оплата и продление (без ЮKassa)
+telegram:
+  enabled: false
+  bot_token: ""                    # @BotFather — только на VPS, не в git
+  bot_username: "MyVpnBot"         # без @
+  admin_chat_ids: [123456789]      # chat_id админа (@userinfobot)
+  db_path: /var/lib/family-portal/bot.db
+  link_token_ttl_seconds: 900      # 15 мин на привязку с портала
+  payment:
+    amount_rub: 400
+    days: 30
+    instructions: |
+      Переведи 400 ₽ по СБП на номер +7XXXXXXXXXX.
+      В комментарии укажи свой логин (user01, user02…).
+
 # Пользователи портала → клиенты 3X-UI (поле Email в панели)
 users:
   - username: ivan
