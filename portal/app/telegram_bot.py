@@ -46,11 +46,11 @@ class TelegramBotContext:
         return chat_id in self.config.telegram.admin_chat_ids
 
 
-def _user_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        [[BTN_STATUS, BTN_PAID]],
-        resize_keyboard=True,
-    )
+def _user_keyboard(bot_ctx: TelegramBotContext, username: str) -> ReplyKeyboardMarkup:
+    buttons = [BTN_STATUS]
+    if bot_ctx.store.get_requires_payment(username):
+        buttons.append(BTN_PAID)
+    return ReplyKeyboardMarkup([buttons], resize_keyboard=True)
 
 
 def _payment_instructions(config: AppConfig, user: PortalUser) -> str:
@@ -85,7 +85,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             f"Telegram привязан к аккаунту {portal_user.display_name}.\n"
             f"Профиль: {portal_user.client_email}",
-            reply_markup=_user_keyboard(),
+            reply_markup=_user_keyboard(bot_ctx, username),
         )
         return
 
@@ -102,10 +102,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Аккаунт не найден. Обратись к админу.")
         return
 
+    requires_payment = bot_ctx.store.get_requires_payment(link.username)
+    hint = "Кнопки ниже: статус"
+    if requires_payment:
+        hint += " и «Я оплатил»."
+    else:
+        hint += ". Бесплатный доступ."
     await update.message.reply_text(
-        f"Привет, {portal_user.display_name}!\n"
-        "Кнопки ниже: статус и «Я оплатил».",
-        reply_markup=_user_keyboard(),
+        f"Привет, {portal_user.display_name}!\n{hint}",
+        reply_markup=_user_keyboard(bot_ctx, link.username),
     )
 
 
@@ -118,7 +123,9 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if text is None:
         await update.message.reply_text("Telegram не привязан. Сделай это на портале VPN.")
         return
-    await update.message.reply_text(text, reply_markup=_user_keyboard())
+    link = bot_ctx.store.get_link_by_chat_id(update.effective_chat.id)
+    username = link.username if link else ""
+    await update.message.reply_text(text, reply_markup=_user_keyboard(bot_ctx, username))
 
 
 def _build_status_text(bot_ctx: TelegramBotContext, chat_id: int) -> str | None:
@@ -128,6 +135,13 @@ def _build_status_text(bot_ctx: TelegramBotContext, chat_id: int) -> str | None:
     portal_user = bot_ctx.portal_user(link.username)
     if portal_user is None:
         return None
+
+    requires_payment = bot_ctx.store.get_requires_payment(link.username)
+    if not requires_payment:
+        return (
+            f"Аккаунт: {portal_user.display_name} ({portal_user.client_email})\n"
+            "Тариф: бесплатный доступ"
+        )
 
     traffic = bot_ctx.xui_ro.get_client_traffic(portal_user.client_email)
     expiry = traffic.expiry_human if traffic else "неизвестно"
@@ -160,6 +174,13 @@ async def handle_paid_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Аккаунт не найден.")
         return
 
+    if not bot_ctx.store.get_requires_payment(link.username):
+        await update.message.reply_text(
+            "Для твоего аккаунта оплата не требуется — бесплатный доступ.",
+            reply_markup=_user_keyboard(bot_ctx, link.username),
+        )
+        return
+
     request_id = bot_ctx.store.create_payment_request(
         username=link.username,
         client_email=portal_user.client_email,
@@ -168,7 +189,7 @@ async def handle_paid_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     if request_id is None:
         await update.message.reply_text(
             "Заявка уже отправлена — жди подтверждения админа.",
-            reply_markup=_user_keyboard(),
+            reply_markup=_user_keyboard(bot_ctx, link.username),
         )
         return
 
@@ -206,7 +227,7 @@ async def handle_paid_request(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await update.message.reply_text(
         "Заявка отправлена админу. После проверки оплаты доступ продлят.",
-        reply_markup=_user_keyboard(),
+        reply_markup=_user_keyboard(bot_ctx, link.username),
     )
 
 
@@ -288,7 +309,7 @@ async def _approve_payment(
                 f"Оплата подтверждена.\n"
                 f"Доступ продлён до {result.expiry_display}."
             ),
-            reply_markup=_user_keyboard(),
+            reply_markup=_user_keyboard(bot_ctx, req.username),
         )
     except Exception:
         logger.exception("failed to notify user %s", req.chat_id)
@@ -321,7 +342,7 @@ async def _reject_payment(
         await query.get_bot().send_message(
             chat_id=req.chat_id,
             text="Заявка отклонена. Если оплата прошла — напиши админу.",
-            reply_markup=_user_keyboard(),
+            reply_markup=_user_keyboard(bot_ctx, req.username),
         )
     except Exception:
         logger.exception("failed to notify user %s", req.chat_id)

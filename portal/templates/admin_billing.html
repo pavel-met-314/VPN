@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VPN — оплата</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap wrap-wide">
+    <main class="card">
+      <div class="topbar">
+        <div>
+          <h1>Кто платит</h1>
+          <p class="muted">По умолчанию все бесплатно. Включи оплату только нужным людям.</p>
+        </div>
+        <a class="btn secondary" href="/portal/">Назад</a>
+      </div>
+
+      {% if just_saved %}
+      <div class="notice">Сохранено.</div>
+      {% endif %}
+
+      <p class="muted">Обновлено: {{ updated_at }}</p>
+
+      {% if not telegram_active %}
+      <p class="muted">Telegram-бот выключен (<code>telegram.enabled: false</code>). Список можно настроить заранее — блок «Оплата» на портале появится после включения бота.</p>
+      {% else %}
+      <p class="muted">Тариф: {{ payment_amount_rub }} ₽ / {{ payment_days }} дн.</p>
+      {% endif %}
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Имя</th>
+            <th>Логин</th>
+            <th>Клиент 3X-UI</th>
+            <th>Статус</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ row.display_name }}</td>
+            <td>{{ row.username }}</td>
+            <td>{{ row.client_email }}</td>
+            <td>
+              {% if row.requires_payment %}
+              <strong>Оплата</strong>
+              {% else %}
+              Бесплатно
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" action="/portal/admin/billing/{{ row.username }}">
+                {% if row.requires_payment %}
+                <input type="hidden" name="action" value="free">
+                <button type="submit" class="secondary">Сделать бесплатным</button>
+                {% else %}
+                <input type="hidden" name="action" value="require">
+                <button type="submit">Требовать оплату</button>
+                {% endif %}
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <p class="muted" style="margin-top:1rem">
+        «Требовать оплату» сразу ставит срок в 3X-UI на «сейчас» — VPN перестаёт работать, пока не оплатят и ты не нажмёшь «+30 дней» в Telegram.
+        «Бесплатно» снимает срок (безлимит).
+      </p>
+    </main>
+  </div>
+</body>
+</html>

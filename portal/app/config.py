@@ -44,6 +44,14 @@ class TelegramConfig:
 
 
 @dataclass(frozen=True)
+class MtproxyConfig:
+    enabled: bool
+    host: str
+    port: int
+    secret: str
+
+
+@dataclass(frozen=True)
 class AppConfig:
     host: str
     port: int
@@ -54,6 +62,7 @@ class AppConfig:
     users: dict[str, PortalUser]
     visit_log: VisitLogConfig
     telegram: TelegramConfig
+    mtproxy: MtproxyConfig
 
 
 def _load_telegram_config(raw: dict[str, Any]) -> TelegramConfig:
@@ -82,6 +91,27 @@ def _load_telegram_config(raw: dict[str, Any]) -> TelegramConfig:
         ),
         link_token_ttl_seconds=int(tg_raw.get("link_token_ttl_seconds", 900)),
     )
+
+
+def _load_mtproxy_config(raw: dict[str, Any], *, public_address: str) -> MtproxyConfig:
+    mt_raw = raw.get("mtproxy", {})
+    if not isinstance(mt_raw, dict):
+        mt_raw = {}
+
+    host = str(mt_raw.get("host", "")).strip() or public_address
+    secret = str(mt_raw.get("secret", "")).strip()
+
+    config = MtproxyConfig(
+        enabled=bool(mt_raw.get("enabled", False)),
+        host=host,
+        port=int(mt_raw.get("port", 8443)),
+        secret=secret,
+    )
+
+    if config.enabled and not config.secret:
+        raise ValueError("mtproxy.enabled=true, но secret пустой")
+
+    return config
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -114,10 +144,13 @@ def load_config(path: str | Path) -> AppConfig:
     if telegram.enabled and not telegram.bot_token:
         raise ValueError("telegram.enabled=true, но bot_token пустой")
 
+    public_address = raw["public_address"]
+    mtproxy = _load_mtproxy_config(raw, public_address=public_address)
+
     return AppConfig(
         host=server.get("host", "127.0.0.1"),
         port=int(server.get("port", 3180)),
-        public_address=raw["public_address"],
+        public_address=public_address,
         session_secret=secret,
         xui_db_path=Path(raw.get("xui_db_path", "/etc/x-ui/x-ui.db")),
         inbound_remark=raw.get("inbound_remark", "family-reality"),
@@ -130,4 +163,5 @@ def load_config(path: str | Path) -> AppConfig:
             admin_usernames=frozenset(str(name) for name in admin_names),
         ),
         telegram=telegram,
+        mtproxy=mtproxy,
     )

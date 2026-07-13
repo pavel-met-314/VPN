@@ -24,7 +24,7 @@ visit_log:
   db_path: /var/lib/family-portal/visits.db
   retention_days: 30
   admin_usernames:
-    - admin
+    - admin          # логин портала админа (например user01)
 
 # Telegram-бот: оплата и продление (без ЮKassa)
 telegram:
@@ -40,6 +40,14 @@ telegram:
     instructions: |
       Переведи 400 ₽ по СБП на номер +7XXXXXXXXXX.
       В комментарии укажи свой логин (user01, user02…).
+
+# MTProto-прокси для Telegram (mtg). Общий секрет для всех — вариант A.
+# Секрет генерит mtg: mtg generate-secret --hex www.cloudflare.com
+mtproxy:
+  enabled: false
+  host: ""                 # пусто = public_address; можно задать домен/IP явно
+  port: 8444               # 8443 занят вторым inbound xray — берём 8444
+  secret: ""               # ee<32hex><domain_hex> — только на VPS, не в git
 
 # Пользователи портала → клиенты 3X-UI (поле Email в панели)
 users:

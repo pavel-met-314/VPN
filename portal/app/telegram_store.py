@@ -77,6 +77,15 @@ class TelegramStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS billing_policy (
+                    username TEXT PRIMARY KEY,
+                    requires_payment INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
 
     def create_link_token(self, username: str, *, ttl_seconds: int) -> str:
@@ -230,3 +239,39 @@ class TelegramStore:
             )
             conn.commit()
         return True
+
+    def get_requires_payment(self, username: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT requires_payment FROM billing_policy WHERE username = ?",
+                (username,),
+            ).fetchone()
+        if row is None:
+            return False
+        return bool(int(row["requires_payment"]))
+
+    def set_requires_payment(self, username: str, requires_payment: bool) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO billing_policy (username, requires_payment, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(username) DO UPDATE SET
+                    requires_payment = excluded.requires_payment,
+                    updated_at = excluded.updated_at
+                """,
+                (username, 1 if requires_payment else 0, self._now_iso()),
+            )
+            conn.commit()
+
+    def list_billing_policies(self, usernames: list[str]) -> dict[str, bool]:
+        if not usernames:
+            return {}
+        placeholders = ",".join("?" for _ in usernames)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT username, requires_payment FROM billing_policy WHERE username IN ({placeholders})",
+                usernames,
+            ).fetchall()
+        policies = {str(row["username"]): bool(int(row["requires_payment"])) for row in rows}
+        return {name: policies.get(name, False) for name in usernames}

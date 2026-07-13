@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VPN — оплата</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <main class="card">
+      <div class="topbar">
+        <div>
+          <h1>Доступ приостановлен</h1>
+          <p class="muted">Профиль: {{ user.client_email }}</p>
+        </div>
+        <form method="post" action="/portal/logout">
+          <button type="submit" class="secondary">Выйти</button>
+        </form>
+      </div>
+
+      <div class="error">
+        VPN-доступ временно отключён — истёк срок оплаты.
+      </div>
+
+      {% if traffic %}
+      <p class="muted">
+        Оплачено до: <strong>{{ traffic.expiry_human }}</strong>
+        {% if traffic.is_expired %}<span class="danger"> (истекло)</span>{% endif %}
+      </p>
+      {% endif %}
+
+      {% if telegram_enabled %}
+      <h2>Как продлить</h2>
+      <p class="muted">Тариф: {{ payment_amount_rub }} ₽ / {{ payment_days }} дн.</p>
+      {% if payment_instructions %}
+      <p class="muted" style="white-space: pre-line">{{ payment_instructions }}</p>
+      {% endif %}
+
+      {% if telegram_linked %}
+      <p class="muted">Telegram подключён — открой бота @{{ telegram_bot_username }}, оплати и нажми «Я оплатил».</p>
+      {% else %}
+      <form method="post" action="/portal/telegram/link">
+        <button type="submit">Привязать Telegram</button>
+      </form>
+      {% endif %}
+
+      {% if telegram_link_url %}
+      <p class="muted">Ссылка действует 15 мин — открой в Telegram:</p>
+      <textarea class="code" id="telegram-link-url" readonly>{{ telegram_link_url }}</textarea>
+      <p class="btn-row">
+        <button type="button" onclick="copyFromField('telegram-link-url', 'copy-tg-status')">Скопировать ссылку</button>
+        <a class="btn secondary" href="{{ telegram_link_url }}">Открыть в Telegram</a>
+        <span id="copy-tg-status" class="muted"></span>
+      </p>
+      {% endif %}
+      {% else %}
+      <p class="muted">Напиши админу VPN, чтобы продлить доступ.</p>
+      {% endif %}
+
+      <p class="btn-row" style="margin-top:1rem">
+        <a class="btn secondary" href="/portal/">Проверить доступ</a>
+      </p>
+    </main>
+    <footer>Не публикуй ссылки в чатах.</footer>
+  </div>
+
+  <script>
+    async function copyFromField(fieldId, statusId) {
+      const el = document.getElementById(fieldId);
+      const status = document.getElementById(statusId);
+      const text = el.value;
+
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          status.textContent = 'Скопировано';
+          return;
+        } catch (e) {}
+      }
+
+      el.focus();
+      el.select();
+      el.setSelectionRange(0, text.length);
+      try {
+        if (document.execCommand('copy')) {
+          status.textContent = 'Скопировано';
+          return;
+        }
+      } catch (e) {}
+
+      status.textContent = 'Выделено — нажми Ctrl+C (или долгий тап → Копировать)';
+    }
+  </script>
+</body>
+</html>

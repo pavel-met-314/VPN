@@ -36,6 +36,7 @@ from app.config import AppConfig, PortalUser, load_config
 from app.telegram_bot import build_bot_application
 from app.telegram_store import TelegramStore
 from app.visit_log import VisitLogStore, run_visit_log_ingest_loop
+from app.xui_admin import XuiAdmin
 from app.xui_db import ClientLink, ClientTraffic, XuiDatabase
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -58,8 +59,8 @@ async def lifespan(_app: FastAPI):
             retention_days=config.visit_log.retention_days,
         )
         _ingest_task = asyncio.create_task(run_visit_log_ingest_loop(_visit_store))
+    _telegram_store = TelegramStore(config.telegram.db_path)
     if config.telegram.enabled:
-        _telegram_store = TelegramStore(config.telegram.db_path)
         _telegram_app = build_bot_application(config, _telegram_store)
         await _telegram_app.initialize()
         await _telegram_app.start()
@@ -119,6 +120,17 @@ def make_qr_png_bytes(text: str) -> bytes:
 
 def now_local_str() -> str:
     return datetime.now(timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M:%S")
+
+
+def build_mtproxy_links(config: AppConfig) -> tuple[str, str]:
+    query = urllib.parse.urlencode(
+        {
+            "server": config.mtproxy.host,
+            "port": config.mtproxy.port,
+            "secret": config.mtproxy.secret,
+        }
+    )
+    return f"https://t.me/proxy?{query}", f"tg://proxy?{query}"
 
 
 def get_hiddify_options() -> dict:
@@ -308,9 +320,62 @@ def get_telegram_store() -> TelegramStore | None:
     return _telegram_store
 
 
+def user_requires_payment(store: TelegramStore | None, username: str) -> bool:
+    if store is None:
+        return False
+    return store.get_requires_payment(username)
+
+
+def billing_ui_enabled(config: AppConfig, *, requires_payment: bool) -> bool:
+    return config.telegram.enabled and bool(config.telegram.bot_username) and requires_payment
+
+
 def build_telegram_connect_url(config: AppConfig, token: str) -> str:
     username = config.telegram.bot_username
     return f"https://t.me/{username}?start=link_{token}"
+
+
+def is_disabled_client_error(exc: LookupError) -> bool:
+    return "отключён" in str(exc)
+
+
+def safe_get_traffic(config: AppConfig, user: PortalUser) -> ClientTraffic | None:
+    try:
+        return XuiDatabase(config.xui_db_path).get_client_traffic(user.client_email)
+    except Exception:
+        return None
+
+
+def render_billing_blocked(
+    request: Request,
+    config: AppConfig,
+    user: PortalUser,
+    *,
+    telegram_link_url: str | None = None,
+) -> HTMLResponse:
+    store = get_telegram_store()
+    requires_payment = user_requires_payment(store, user.username)
+    telegram_enabled = billing_ui_enabled(config, requires_payment=requires_payment)
+    telegram_linked = False
+    if telegram_enabled and store is not None:
+        telegram_linked = store.get_link_by_username(user.username) is not None
+
+    return templates.TemplateResponse(
+        request,
+        "billing_blocked.html",
+        {
+            "user": user,
+            "traffic": safe_get_traffic(config, user),
+            "telegram_enabled": telegram_enabled,
+            "telegram_linked": telegram_linked,
+            "telegram_bot_username": config.telegram.bot_username,
+            "telegram_link_url": telegram_link_url,
+            "payment_amount_rub": config.telegram.payment.amount_rub,
+            "payment_days": config.telegram.payment.days,
+            "payment_instructions": config.telegram.payment.instructions,
+        },
+        status_code=402,
+    )
 
 
 def resolve_inbound_remark(config: AppConfig, user: PortalUser) -> str:
@@ -436,6 +501,8 @@ def dashboard(
     try:
         client, traffic = load_client_data(config, user)
     except LookupError as exc:
+        if is_disabled_client_error(exc):
+            return render_billing_blocked(request, config, user)
         return templates.TemplateResponse(
             request,
             "error.html",
@@ -453,10 +520,15 @@ def dashboard(
         f"{request.url_for('subscription_clash', token=sub_token)}?format=hiddify"
     )
 
-    telegram_enabled = config.telegram.enabled and bool(config.telegram.bot_username)
+    telegram_requires_payment = user_requires_payment(_telegram_store, user.username)
+    telegram_enabled = billing_ui_enabled(config, requires_payment=telegram_requires_payment)
     telegram_linked = False
     if telegram_enabled and _telegram_store is not None:
         telegram_linked = _telegram_store.get_link_by_username(user.username) is not None
+
+    mtproxy_link, mtproxy_tg_link = ("", "")
+    if config.mtproxy.enabled:
+        mtproxy_link, mtproxy_tg_link = build_mtproxy_links(config)
 
     return templates.TemplateResponse(
         request,
@@ -474,6 +546,9 @@ def dashboard(
             "telegram_link_url": None,
             "payment_amount_rub": config.telegram.payment.amount_rub,
             "payment_days": config.telegram.payment.days,
+            "mtproxy_enabled": config.mtproxy.enabled,
+            "mtproxy_link": mtproxy_link,
+            "mtproxy_tg_link": mtproxy_tg_link,
             "updated_at": now_local_str(),
             "just_refreshed": refresh == 1,
             "is_admin": is_admin(config, user),
@@ -492,28 +567,33 @@ def telegram_link_create(
         return user_or_redirect
     user = user_or_redirect
 
-    if not config.telegram.enabled or not config.telegram.bot_username:
-        raise HTTPException(status_code=404, detail="Telegram-бот не настроен")
-
     store = get_telegram_store()
     if store is None:
-        raise HTTPException(status_code=503, detail="Telegram-бот не запущен")
+        raise HTTPException(status_code=503, detail="Сервис оплаты недоступен")
 
-    try:
-        client, traffic = load_client_data(config, user)
-    except LookupError as exc:
-        return templates.TemplateResponse(
-            request,
-            "error.html",
-            {"user": user, "message": str(exc)},
-            status_code=500,
-        )
+    if not billing_ui_enabled(config, requires_payment=user_requires_payment(store, user.username)):
+        raise HTTPException(status_code=404, detail="Оплата для этого аккаунта не требуется")
+
+    if not config.telegram.enabled or not config.telegram.bot_username:
+        raise HTTPException(status_code=404, detail="Telegram-бот не настроен")
 
     token = store.create_link_token(
         user.username,
         ttl_seconds=config.telegram.link_token_ttl_seconds,
     )
     connect_url = build_telegram_connect_url(config, token)
+
+    try:
+        client, traffic = load_client_data(config, user)
+    except LookupError as exc:
+        if is_disabled_client_error(exc):
+            return render_billing_blocked(request, config, user, telegram_link_url=connect_url)
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            {"user": user, "message": str(exc)},
+            status_code=500,
+        )
 
     sub_serializer = get_subscription_serializer(config.session_secret)
     sub_token = create_subscription_token(sub_serializer, user.username)
@@ -532,12 +612,18 @@ def telegram_link_create(
             "qr_data_url": make_qr_data_url(client.vless_link),
             "clash_profile_url": clash_profile_url,
             "hiddify_subscription_url": hiddify_subscription_url,
-            "telegram_enabled": True,
+            "telegram_enabled": billing_ui_enabled(
+                config,
+                requires_payment=user_requires_payment(store, user.username),
+            ),
             "telegram_linked": store.get_link_by_username(user.username) is not None,
             "telegram_bot_username": config.telegram.bot_username,
             "telegram_link_url": connect_url,
             "payment_amount_rub": config.telegram.payment.amount_rub,
             "payment_days": config.telegram.payment.days,
+            "mtproxy_enabled": config.mtproxy.enabled,
+            "mtproxy_link": build_mtproxy_links(config)[0] if config.mtproxy.enabled else "",
+            "mtproxy_tg_link": build_mtproxy_links(config)[1] if config.mtproxy.enabled else "",
             "updated_at": now_local_str(),
             "just_refreshed": False,
             "is_admin": is_admin(config, user),
@@ -597,6 +683,94 @@ def admin_visits(
     )
 
 
+@app.get("/portal/admin/billing", response_class=HTMLResponse, response_model=None)
+def admin_billing(
+    request: Request,
+    saved: int | None = None,
+    config: AppConfig = Depends(get_config),
+    serializer: URLSafeTimedSerializer = Depends(get_serializer),
+) -> Response:
+    user_or_redirect = require_admin(request, config, serializer)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+
+    store = get_telegram_store()
+    usernames = sorted(config.users.keys())
+    policies: dict[str, bool] = {}
+    if store is not None:
+        policies = store.list_billing_policies(usernames)
+
+    rows = [
+        {
+            "username": portal_user.username,
+            "display_name": portal_user.display_name,
+            "client_email": portal_user.client_email,
+            "requires_payment": policies.get(portal_user.username, False),
+        }
+        for portal_user in sorted(config.users.values(), key=lambda u: u.display_name)
+    ]
+
+    return templates.TemplateResponse(
+        request,
+        "admin_billing.html",
+        {
+            "user": user,
+            "rows": rows,
+            "telegram_active": config.telegram.enabled and bool(config.telegram.bot_username),
+            "payment_amount_rub": config.telegram.payment.amount_rub,
+            "payment_days": config.telegram.payment.days,
+            "just_saved": saved == 1,
+            "updated_at": now_local_str(),
+        },
+    )
+
+
+@app.post("/portal/admin/billing/{username}")
+def admin_billing_set(
+    request: Request,
+    username: str,
+    action: str = Form(...),
+    config: AppConfig = Depends(get_config),
+    serializer: URLSafeTimedSerializer = Depends(get_serializer),
+) -> Response:
+    user_or_redirect = require_admin(request, config, serializer)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+
+    if username not in config.users:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if action not in ("require", "free"):
+        raise HTTPException(status_code=400, detail="Некорректное действие")
+
+    store = get_telegram_store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Сервис биллинга недоступен")
+
+    target = config.users[username]
+    inbound_remark = target.inbound_remark or config.inbound_remark
+    xui = XuiAdmin(config.xui_db_path)
+    requires = action == "require"
+    try:
+        if requires:
+            # Сразу режем доступ: expiry = сейчас. Вернётся после оплаты + «+30 дней».
+            xui.expire_client_now(
+                inbound_remark=inbound_remark,
+                client_email=target.client_email,
+            )
+        else:
+            # Бесплатно: без срока.
+            xui.clear_client_expiry(
+                inbound_remark=inbound_remark,
+                client_email=target.client_email,
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Не удалось обновить 3X-UI: {exc}") from exc
+
+    store.set_requires_payment(username, requires)
+    return RedirectResponse(url="/portal/admin/billing?saved=1", status_code=303)
+
+
 @app.get("/portal/qr.png")
 def download_qr(
     request: Request,
@@ -618,6 +792,27 @@ def download_qr(
         content=make_qr_png_bytes(client.vless_link),
         media_type="image/png",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/portal/mtproxy-qr.png")
+def download_mtproxy_qr(
+    request: Request,
+    config: AppConfig = Depends(get_config),
+    serializer: URLSafeTimedSerializer = Depends(get_serializer),
+) -> Response:
+    user_or_redirect = require_user(request, config, serializer)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+
+    if not config.mtproxy.enabled:
+        raise HTTPException(status_code=404, detail="MTProto-прокси не настроен")
+
+    https_link, _ = build_mtproxy_links(config)
+    return Response(
+        content=make_qr_png_bytes(https_link),
+        media_type="image/png",
+        headers={"Content-Disposition": 'attachment; filename="telegram-proxy.png"'},
     )
 
 
