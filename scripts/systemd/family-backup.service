@@ -1,0 +1,10 @@
+[Unit]
+Description=Backup family VPN configs and SQLite databases
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/family-portal/scripts/07-backup.sh
+Environment=KEEP=14
+Environment=BACKUP_DIR=/var/backups/family-vpn
+Environment=BACKUP_OWNER=vpnadmin

@@ -1,0 +1,11 @@
+# Скрипты и unit-файлы, уезжающие на Linux-сервер, всегда с LF —
+# иначе bash/systemd падают на CRLF ($'\r': command not found).
+*.sh        text eol=lf
+*.service   text eol=lf
+*.timer     text eol=lf
+*.py        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+
+# Windows-скрипты оставляем как есть.
+*.ps1       text eol=crlf
