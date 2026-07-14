@@ -1,6 +1,7 @@
 [Unit]
 Description=Backup family VPN configs and SQLite databases
 After=network.target
+OnFailure=family-backup-notify-fail.service
 
 [Service]
 Type=oneshot

@@ -137,7 +137,7 @@ sudo systemctl restart family-portal
 ```yaml
 visit_log:
   enabled: true
-  access_log_path: /var/log/xray/access.log
+  access_log_path: /var/log/x-ui/access.log
   db_path: /var/lib/family-portal/visits.db
   retention_days: 30
   admin_usernames:
@@ -153,7 +153,7 @@ sudo mkdir -p /var/lib/family-portal
 sudo chown family-portal:family-portal /var/lib/family-portal
 sudo chmod 750 /var/lib/family-portal
 # если access.log не читается:
-sudo chmod o+r /var/log/xray/access.log
+sudo chmod o+r /var/log/x-ui/access.log
 ```
 
 Страница: `/portal/admin/visits` (кнопка видна только admin).
@@ -197,6 +197,33 @@ sudo chmod 440 /etc/sudoers.d/family-portal-xui
 **Сценарий:** портал → «Привязать Telegram» → в боте «Я оплатил» → админ жмёт **+30 дней**.
 
 **Кто платит:** `/portal/admin/billing` (только admin). По умолчанию все **бесплатно**; включи «Требовать оплату» только нужным пользователям.
+
+## 6b.10 Автобиллинг (напоминания + автовыключение)
+
+Почасовой таймер `family-billing`:
+- шлёт в Telegram «истекает через N дн.» за 3 дня до срока (один раз);
+- шлёт «доступ приостановлен» после истечения (повтор раз в 3 дня);
+- страховка: если клиент просрочен, но 3X-UI ещё не выключил — выключает сам.
+
+Работает только для тех, у кого включено «Требовать оплату» **и** привязан Telegram.
+Использует тот же `bot_token` и `bot.db`, что и бот.
+
+Установка:
+
+```bash
+sudo cp /opt/family-portal/scripts/systemd/family-billing.service /etc/systemd/system/
+sudo cp /opt/family-portal/scripts/systemd/family-billing.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now family-billing.timer
+systemctl list-timers family-billing.timer --no-pager
+```
+
+Прогнать сейчас и посмотреть лог:
+
+```bash
+sudo systemctl start family-billing.service
+journalctl -u family-billing.service -n 30 --no-pager
+```
 
 | Симптом | Решение |
 |---------|---------|

@@ -245,6 +245,44 @@ class XuiAdmin:
             restart=restart,
         )
 
+    def _current_expiry_ms(self, *, inbound_remark: str, client_email: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT settings FROM inbounds WHERE remark = ? LIMIT 1",
+                (inbound_remark,),
+            ).fetchone()
+        if row is None:
+            raise LookupError(f"Inbound '{inbound_remark}' не найден")
+        settings = parse_json_field(row["settings"])
+        clients = settings.get("clients", [])
+        if isinstance(clients, list):
+            for item in clients:
+                if isinstance(item, dict) and item.get("email") == client_email:
+                    return int(item.get("expiryTime") or 0)
+        raise LookupError(f"Клиент '{client_email}' не найден")
+
+    def disable_client(
+        self,
+        *,
+        inbound_remark: str,
+        client_email: str,
+        restart: bool = True,
+    ) -> ExtendResult:
+        """Выключить клиента (enable=False), сохранив его срок."""
+        current = self._current_expiry_ms(
+            inbound_remark=inbound_remark,
+            client_email=client_email,
+        )
+        result = self._write_client_expiry(
+            inbound_remark=inbound_remark,
+            client_email=client_email,
+            expiry_ms=current,
+            enable=False,
+        )
+        if restart:
+            self.restart_xui_background()
+        return result
+
     def restart_xui(self) -> None:
         # -n: не ждать пароль (иначе HTTP-запрос висит → пустая страница в браузере)
         result = subprocess.run(

@@ -86,6 +86,17 @@ class TelegramStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS billing_notifications (
+                    username TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    expiry_ms INTEGER NOT NULL,
+                    sent_at TEXT NOT NULL,
+                    PRIMARY KEY (username, kind)
+                )
+                """
+            )
             conn.commit()
 
     def create_link_token(self, username: str, *, ttl_seconds: int) -> str:
@@ -261,6 +272,50 @@ class TelegramStore:
                     updated_at = excluded.updated_at
                 """,
                 (username, 1 if requires_payment else 0, self._now_iso()),
+            )
+            conn.commit()
+
+    def should_notify(
+        self,
+        username: str,
+        kind: str,
+        expiry_ms: int,
+        *,
+        renudge_days: int | None = None,
+    ) -> bool:
+        """True, если про этот срок ещё не слали (или пора повторить через renudge_days)."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT expiry_ms, sent_at FROM billing_notifications WHERE username = ? AND kind = ?",
+                (username, kind),
+            ).fetchone()
+        if row is None:
+            return True
+        # Новый платёжный цикл (админ продлил) — уведомляем заново.
+        if int(row["expiry_ms"]) != int(expiry_ms):
+            return True
+        if renudge_days is not None:
+            try:
+                sent = datetime.fromisoformat(str(row["sent_at"]))
+            except ValueError:
+                return True
+            if sent.tzinfo is None:
+                sent = sent.replace(tzinfo=GMT3)
+            if (datetime.now(GMT3) - sent).total_seconds() >= renudge_days * 86400:
+                return True
+        return False
+
+    def mark_notified(self, username: str, kind: str, expiry_ms: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO billing_notifications (username, kind, expiry_ms, sent_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(username, kind) DO UPDATE SET
+                    expiry_ms = excluded.expiry_ms,
+                    sent_at = excluded.sent_at
+                """,
+                (username, kind, int(expiry_ms), self._now_iso()),
             )
             conn.commit()
 

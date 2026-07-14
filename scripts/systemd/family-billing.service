@@ -1,0 +1,12 @@
+[Unit]
+Description=Family VPN billing reminders and expiry enforcement
+After=network.target x-ui.service family-portal.service
+Wants=x-ui.service
+
+[Service]
+Type=oneshot
+User=family-portal
+Group=family-portal
+WorkingDirectory=/opt/family-portal
+Environment=FAMILY_PORTAL_CONFIG=/etc/family-portal/config.yaml
+ExecStart=/opt/family-portal/venv/bin/python -m app.billing_cron

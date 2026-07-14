@@ -1,0 +1,11 @@
+[Unit]
+Description=Notify Telegram that family VPN backup failed
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=family-portal
+Group=family-portal
+WorkingDirectory=/opt/family-portal
+Environment=FAMILY_PORTAL_CONFIG=/etc/family-portal/config.yaml
+ExecStart=/opt/family-portal/venv/bin/python -m app.telegram_notify --text "🚨 Ночной бэкап VPN упал. Смотри: sudo journalctl -u family-backup.service -n 50 --no-pager"

@@ -52,6 +52,14 @@ class MtproxyConfig:
 
 
 @dataclass(frozen=True)
+class ExtraNode:
+    """Запасной VLESS-узел (второй VPS) для Clash url-test."""
+
+    name: str
+    vless_link: str
+
+
+@dataclass(frozen=True)
 class AppConfig:
     host: str
     port: int
@@ -63,6 +71,7 @@ class AppConfig:
     visit_log: VisitLogConfig
     telegram: TelegramConfig
     mtproxy: MtproxyConfig
+    extra_nodes: tuple[ExtraNode, ...]
 
 
 def _load_telegram_config(raw: dict[str, Any]) -> TelegramConfig:
@@ -147,6 +156,15 @@ def load_config(path: str | Path) -> AppConfig:
     public_address = raw["public_address"]
     mtproxy = _load_mtproxy_config(raw, public_address=public_address)
 
+    extra_nodes: list[ExtraNode] = []
+    for item in raw.get("extra_nodes", []) or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        link = str(item.get("vless_link", "")).strip()
+        if name and link.startswith("vless://"):
+            extra_nodes.append(ExtraNode(name=name, vless_link=link))
+
     return AppConfig(
         host=server.get("host", "127.0.0.1"),
         port=int(server.get("port", 3180)),
@@ -157,11 +175,12 @@ def load_config(path: str | Path) -> AppConfig:
         users=users,
         visit_log=VisitLogConfig(
             enabled=bool(visit_raw.get("enabled", False)),
-            access_log_path=Path(visit_raw.get("access_log_path", "/var/log/xray/access.log")),
+            access_log_path=Path(visit_raw.get("access_log_path", "/var/log/x-ui/access.log")),
             db_path=Path(visit_raw.get("db_path", "/var/lib/family-portal/visits.db")),
             retention_days=int(visit_raw.get("retention_days", 30)),
             admin_usernames=frozenset(str(name) for name in admin_names),
         ),
         telegram=telegram,
         mtproxy=mtproxy,
+        extra_nodes=tuple(extra_nodes),
     )

@@ -1,0 +1,13 @@
+[Unit]
+Description=Family VPN health check and Telegram alerts
+After=network-online.target x-ui.service family-portal.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=family-portal
+Group=family-portal
+WorkingDirectory=/opt/family-portal
+Environment=FAMILY_PORTAL_CONFIG=/etc/family-portal/config.yaml
+Environment=FAMILY_HEALTH_STATE=/var/lib/family-portal/health-monitor.json
+ExecStart=/opt/family-portal/venv/bin/python -m app.health_monitor

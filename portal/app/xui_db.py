@@ -27,6 +27,7 @@ class ClientTraffic:
     total_limit: int
     expiry_time: int
     last_online: int
+    enable: bool = True
 
     @property
     def used(self) -> int:
@@ -168,7 +169,7 @@ class XuiDatabase:
             try:
                 row = conn.execute(
                     """
-                    SELECT up, down, total, expiry_time, last_online
+                    SELECT up, down, total, expiry_time, last_online, enable
                     FROM client_traffics
                     WHERE email = ?
                     LIMIT 1
@@ -187,4 +188,5 @@ class XuiDatabase:
             total_limit=int(row["total"] or 0),
             expiry_time=int(row["expiry_time"] or 0),
             last_online=int(row["last_online"] or 0),
+            enable=bool(row["enable"]) if row["enable"] is not None else True,
         )

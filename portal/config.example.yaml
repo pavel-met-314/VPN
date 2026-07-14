@@ -20,7 +20,7 @@ inbound_remark: family-reality
 # Лог посещений (домены из access.log Xray) — только для admin_usernames
 visit_log:
   enabled: true
-  access_log_path: /var/log/xray/access.log
+  access_log_path: /var/log/x-ui/access.log
   db_path: /var/lib/family-portal/visits.db
   retention_days: 30
   admin_usernames:
@@ -48,6 +48,12 @@ mtproxy:
   host: ""                 # пусто = public_address; можно задать домен/IP явно
   port: 8444               # 8443 занят вторым inbound xray — берём 8444
   secret: ""               # ee<32hex><domain_hex> — только на VPS, не в git
+
+# Запасные VLESS-узлы (второй VPS). См. docs/stages/08-second-vps.md
+# Появляются в Clash как AUTO (url-test) + ручной выбор.
+# extra_nodes:
+#   - name: "VPN-DE"
+#     vless_link: "vless://UUID@IP:443?encryption=none&security=reality&..."
 
 # Пользователи портала → клиенты 3X-UI (поле Email в панели)
 users:

@@ -214,12 +214,7 @@ CLASH_RULES_RU_SPLIT = [
 ]
 
 
-def build_clash_yaml_from_vless_link(
-    *,
-    vless_link: str,
-    profile_name: str,
-    split_ru: bool = True,
-) -> str:
+def _vless_link_to_clash_proxy(vless_link: str, proxy_name: str) -> dict:
     split = urllib.parse.urlsplit(vless_link)
     uuid = split.username or ""
     host = split.hostname or ""
@@ -228,10 +223,9 @@ def build_clash_yaml_from_vless_link(
     query = urllib.parse.parse_qs(split.query)
     params = {k: (v[0] if v else "") for k, v in query.items()}
 
-    proxy_name = profile_name.strip() or urllib.parse.unquote(split.fragment or "") or "VPN"
-
+    name = proxy_name.strip() or urllib.parse.unquote(split.fragment or "") or "VPN"
     proxy: dict = {
-        "name": proxy_name,
+        "name": name,
         "type": "vless",
         "server": host,
         "port": int(port),
@@ -255,6 +249,55 @@ def build_clash_yaml_from_vless_link(
         proxy["reality-opts"] = {"public-key": pbk}
         if sid:
             proxy["reality-opts"]["short-id"] = sid
+    return proxy
+
+
+def build_clash_yaml_from_vless_link(
+    *,
+    vless_link: str,
+    profile_name: str,
+    split_ru: bool = True,
+    extra_nodes: tuple | list | None = None,
+) -> str:
+    primary = _vless_link_to_clash_proxy(vless_link, profile_name)
+    proxies = [primary]
+    node_names = [primary["name"]]
+
+    for node in extra_nodes or ():
+        name = getattr(node, "name", None) or (node.get("name") if isinstance(node, dict) else None)
+        link = getattr(node, "vless_link", None) or (
+            node.get("vless_link") if isinstance(node, dict) else None
+        )
+        if not name or not link:
+            continue
+        if name in node_names:
+            continue
+        proxies.append(_vless_link_to_clash_proxy(str(link), str(name)))
+        node_names.append(str(name))
+
+    proxy_groups: list[dict] = []
+    if len(node_names) > 1:
+        proxy_groups.append(
+            {
+                "name": "AUTO",
+                "type": "url-test",
+                "url": "http://www.gstatic.com/generate_204",
+                "interval": 300,
+                "tolerance": 50,
+                "proxies": list(node_names),
+            }
+        )
+        select_proxies = ["AUTO", *node_names, "DIRECT"]
+    else:
+        select_proxies = [node_names[0], "DIRECT"]
+
+    proxy_groups.append(
+        {
+            "name": "VPN",
+            "type": "select",
+            "proxies": select_proxies,
+        }
+    )
 
     cfg: dict = {
         "mixed-port": 7890,
@@ -263,14 +306,8 @@ def build_clash_yaml_from_vless_link(
         "log-level": "info",
         "ipv6": False,
         "profile-update-interval": 86400,
-        "proxies": [proxy],
-        "proxy-groups": [
-            {
-                "name": "VPN",
-                "type": "select",
-                "proxies": [proxy_name, "DIRECT"],
-            }
-        ],
+        "proxies": proxies,
+        "proxy-groups": proxy_groups,
         "rules": CLASH_RULES_RU_SPLIT if split_ru else ["MATCH,VPN"],
     }
 
@@ -415,9 +452,20 @@ def clash_profile_response(*, content: str, filename: str) -> Response:
     )
 
 
-def hiddify_subscription_response(*, vless_link: str) -> Response:
+def hiddify_subscription_response(
+    *,
+    vless_link: str,
+    extra_nodes: tuple | list | None = None,
+) -> Response:
     # Hiddify / v2rayNG: классическая подписка = base64 со списком vless:// ссылок.
-    body = base64.b64encode(f"{vless_link}\n".encode("utf-8")).decode("ascii")
+    lines = [vless_link]
+    for node in extra_nodes or ():
+        link = getattr(node, "vless_link", None) or (
+            node.get("vless_link") if isinstance(node, dict) else None
+        )
+        if link:
+            lines.append(str(link))
+    body = base64.b64encode(("\n".join(lines) + "\n").encode("utf-8")).decode("ascii")
     return Response(
         content=body,
         media_type="text/plain; charset=utf-8",
@@ -852,6 +900,7 @@ def subscription_clash_yaml(
         vless_link=client.vless_link,
         profile_name=f"vpn-{client.email}",
         split_ru=True,
+        extra_nodes=config.extra_nodes,
     )
     return clash_profile_response(content=content, filename=f"vpn-{client.email}.yaml")
 
@@ -869,12 +918,16 @@ def subscription_clash(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if format in ("hiddify", "links"):
-        return hiddify_subscription_response(vless_link=client.vless_link)
+        return hiddify_subscription_response(
+            vless_link=client.vless_link,
+            extra_nodes=config.extra_nodes,
+        )
 
     content = build_clash_yaml_from_vless_link(
         vless_link=client.vless_link,
         profile_name=f"vpn-{client.email}",
         split_ru=True,
+        extra_nodes=config.extra_nodes,
     )
     return clash_profile_response(content=content, filename=f"vpn-{client.email}.yaml")
 
@@ -899,6 +952,7 @@ def download_clash_yaml(
         vless_link=client.vless_link,
         profile_name=f"vpn-{client.email}",
         split_ru=True,
+        extra_nodes=config.extra_nodes,
     )
     filename = f"vpn-{client.email}.yaml"
     return Response(
