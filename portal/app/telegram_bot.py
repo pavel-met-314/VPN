@@ -45,6 +45,22 @@ class TelegramBotContext:
     def is_admin(self, chat_id: int) -> bool:
         return chat_id in self.config.telegram.admin_chat_ids
 
+    def resolve_user_arg(self, raw: str) -> PortalUser | None:
+        """Логин портала или client_email (user05)."""
+        key = raw.strip()
+        if not key:
+            return None
+        user = self.config.users.get(key)
+        if user is not None:
+            return user
+        key_lower = key.lower()
+        for portal_user in self.config.users.values():
+            if portal_user.username.lower() == key_lower:
+                return portal_user
+            if portal_user.client_email.lower() == key_lower:
+                return portal_user
+        return None
+
 
 def _user_keyboard(bot_ctx: TelegramBotContext, username: str) -> ReplyKeyboardMarkup:
     buttons = [BTN_STATUS]
@@ -348,6 +364,211 @@ async def _reject_payment(
         logger.exception("failed to notify user %s", req.chat_id)
 
 
+async def _deny_non_admin(update: Update, bot_ctx: TelegramBotContext) -> bool:
+    """True = отказ (не админ или нет message)."""
+    if update.effective_chat is None or update.message is None:
+        return True
+    if not bot_ctx.is_admin(update.effective_chat.id):
+        await update.message.reply_text("Команда только для админа.")
+        return True
+    return False
+
+
+async def _notify_linked_user(bot_ctx: TelegramBotContext, bot, username: str, text: str) -> None:
+    link = bot_ctx.store.get_link_by_username(username)
+    if link is None:
+        return
+    try:
+        await bot.send_message(
+            chat_id=link.chat_id,
+            text=text,
+            reply_markup=_user_keyboard(bot_ctx, username),
+        )
+    except Exception:
+        logger.exception("failed to notify linked user %s", username)
+
+
+async def cmd_admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    bot_ctx: TelegramBotContext = context.application.bot_data["bot_ctx"]
+    if await _deny_non_admin(update, bot_ctx):
+        return
+    assert update.message is not None
+    days = bot_ctx.config.telegram.payment.days
+    await update.message.reply_text(
+        "Админ-команды (логин портала или email клиента):\n"
+        "/who — список: тариф, срок, Telegram\n"
+        "/pay <user> — требовать оплату (сразу режет доступ)\n"
+        "/free <user> — бесплатно без срока\n"
+        f"/extend <user> [дни] — продлить (по умолчанию {days})\n"
+        "/admin — эта справка"
+    )
+
+
+async def cmd_who(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    bot_ctx: TelegramBotContext = context.application.bot_data["bot_ctx"]
+    if await _deny_non_admin(update, bot_ctx):
+        return
+    assert update.message is not None
+
+    usernames = sorted(bot_ctx.config.users.keys())
+    policies = bot_ctx.store.list_billing_policies(usernames)
+    lines: list[str] = ["Пользователи:"]
+    for portal_user in sorted(bot_ctx.config.users.values(), key=lambda u: u.client_email):
+        requires = policies.get(portal_user.username, False)
+        link = bot_ctx.store.get_link_by_username(portal_user.username)
+        tg = "TG✓" if link else "TG—"
+        if requires:
+            traffic = bot_ctx.xui_ro.get_client_traffic(portal_user.client_email)
+            expiry = traffic.expiry_human if traffic else "?"
+            flag = "💸"
+            if traffic and traffic.is_expired:
+                flag = "⛔"
+            lines.append(
+                f"{flag} {portal_user.client_email} ({portal_user.username}) "
+                f"до {expiry} {tg}"
+            )
+        else:
+            lines.append(
+                f"🆓 {portal_user.client_email} ({portal_user.username}) free {tg}"
+            )
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3990] + "\n…"
+    await update.message.reply_text(text)
+
+
+async def cmd_pay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    bot_ctx: TelegramBotContext = context.application.bot_data["bot_ctx"]
+    if await _deny_non_admin(update, bot_ctx):
+        return
+    assert update.message is not None
+
+    args = context.args or []
+    if len(args) != 1:
+        await update.message.reply_text("Использование: /pay <user>")
+        return
+
+    portal_user = bot_ctx.resolve_user_arg(args[0])
+    if portal_user is None:
+        await update.message.reply_text("Пользователь не найден.")
+        return
+
+    try:
+        bot_ctx.xui_admin.expire_client_now(
+            inbound_remark=bot_ctx.resolve_inbound_remark(portal_user),
+            client_email=portal_user.client_email,
+        )
+    except Exception as exc:
+        logger.exception("admin /pay failed")
+        await update.message.reply_text(f"Ошибка x-ui: {exc}")
+        return
+
+    bot_ctx.store.set_requires_payment(portal_user.username, True)
+    await update.message.reply_text(
+        f"💸 {portal_user.display_name} ({portal_user.client_email}): "
+        "требуется оплата, доступ отключён до продления."
+    )
+    await _notify_linked_user(
+        bot_ctx,
+        context.bot,
+        portal_user.username,
+        "Админ включил оплату для твоего аккаунта. "
+        "Доступ приостановлен — оплати и нажми «Я оплатил».",
+    )
+
+
+async def cmd_free(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    bot_ctx: TelegramBotContext = context.application.bot_data["bot_ctx"]
+    if await _deny_non_admin(update, bot_ctx):
+        return
+    assert update.message is not None
+
+    args = context.args or []
+    if len(args) != 1:
+        await update.message.reply_text("Использование: /free <user>")
+        return
+
+    portal_user = bot_ctx.resolve_user_arg(args[0])
+    if portal_user is None:
+        await update.message.reply_text("Пользователь не найден.")
+        return
+
+    try:
+        bot_ctx.xui_admin.clear_client_expiry(
+            inbound_remark=bot_ctx.resolve_inbound_remark(portal_user),
+            client_email=portal_user.client_email,
+        )
+    except Exception as exc:
+        logger.exception("admin /free failed")
+        await update.message.reply_text(f"Ошибка x-ui: {exc}")
+        return
+
+    bot_ctx.store.set_requires_payment(portal_user.username, False)
+    await update.message.reply_text(
+        f"🆓 {portal_user.display_name} ({portal_user.client_email}): "
+        "бесплатный доступ без срока."
+    )
+    await _notify_linked_user(
+        bot_ctx,
+        context.bot,
+        portal_user.username,
+        "Админ включил бесплатный доступ для твоего аккаунта. VPN снова без срока оплаты.",
+    )
+
+
+async def cmd_extend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    bot_ctx: TelegramBotContext = context.application.bot_data["bot_ctx"]
+    if await _deny_non_admin(update, bot_ctx):
+        return
+    assert update.message is not None
+
+    args = context.args or []
+    if len(args) < 1 or len(args) > 2:
+        await update.message.reply_text("Использование: /extend <user> [дни]")
+        return
+
+    portal_user = bot_ctx.resolve_user_arg(args[0])
+    if portal_user is None:
+        await update.message.reply_text("Пользователь не найден.")
+        return
+
+    days = bot_ctx.config.telegram.payment.days
+    if len(args) == 2:
+        try:
+            days = int(args[1])
+        except ValueError:
+            await update.message.reply_text("Дни должны быть числом.")
+            return
+        if days <= 0 or days > 3660:
+            await update.message.reply_text("Дни: от 1 до 3660.")
+            return
+
+    try:
+        result = bot_ctx.xui_admin.extend_client(
+            inbound_remark=bot_ctx.resolve_inbound_remark(portal_user),
+            client_email=portal_user.client_email,
+            days=days,
+        )
+    except Exception as exc:
+        logger.exception("admin /extend failed")
+        await update.message.reply_text(f"Ошибка x-ui: {exc}")
+        return
+
+    # Продление вручную обычно значит, что человек на платном тарифе.
+    bot_ctx.store.set_requires_payment(portal_user.username, True)
+    await update.message.reply_text(
+        f"✅ {portal_user.display_name} ({portal_user.client_email}): "
+        f"+{days} дн. → до {result.expiry_display}"
+    )
+    await _notify_linked_user(
+        bot_ctx,
+        context.bot,
+        portal_user.username,
+        f"Админ продлил доступ на {days} дн.\nОплачено до: {result.expiry_display}.",
+    )
+
+
 def build_bot_application(config: AppConfig, store: TelegramStore) -> Application:
     bot_ctx = TelegramBotContext(config, store)
     application = (
@@ -359,6 +580,11 @@ def build_bot_application(config: AppConfig, store: TelegramStore) -> Applicatio
 
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("status", cmd_status))
+    application.add_handler(CommandHandler("admin", cmd_admin_help))
+    application.add_handler(CommandHandler("who", cmd_who))
+    application.add_handler(CommandHandler("pay", cmd_pay))
+    application.add_handler(CommandHandler("free", cmd_free))
+    application.add_handler(CommandHandler("extend", cmd_extend))
     application.add_handler(CallbackQueryHandler(handle_admin_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
