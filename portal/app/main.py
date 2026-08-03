@@ -35,6 +35,7 @@ from app.auth import (
 from app.config import AppConfig, PortalUser, load_config
 from app.telegram_bot import build_bot_application
 from app.telegram_store import TelegramStore
+from app.tg_admin import create_tg_admin_router
 from app.visit_log import VisitLogStore, run_visit_log_ingest_loop
 from app.xui_admin import XuiAdmin
 from app.xui_db import ClientLink, ClientTraffic, XuiDatabase
@@ -357,14 +358,44 @@ def get_telegram_store() -> TelegramStore | None:
     return _telegram_store
 
 
+async def notify_telegram_user(username: str, text: str) -> bool | None:
+    store = get_telegram_store()
+    if store is None or _telegram_app is None:
+        return None
+    link = await asyncio.to_thread(store.get_link_by_username, username)
+    if link is None:
+        return None
+    await _telegram_app.bot.send_message(chat_id=link.chat_id, text=text)
+    return True
+
+
+app.include_router(
+    create_tg_admin_router(
+        get_config=get_config,
+        get_store=get_telegram_store,
+        notify_user=notify_telegram_user,
+    )
+)
+
+
+@app.get("/portal/tg-admin/", response_class=HTMLResponse, response_model=None)
+def tg_admin_mini_app(request: Request) -> HTMLResponse:
+    """HTML-оболочка Mini App; авторизация выполняется только Admin API."""
+    return templates.TemplateResponse(request, "tg_admin.html", {})
+
+
 def user_requires_payment(store: TelegramStore | None, username: str) -> bool:
     if store is None:
         return False
     return store.get_requires_payment(username)
 
 
+def telegram_ui_enabled(config: AppConfig) -> bool:
+    return config.telegram.enabled and bool(config.telegram.bot_username)
+
+
 def billing_ui_enabled(config: AppConfig, *, requires_payment: bool) -> bool:
-    return config.telegram.enabled and bool(config.telegram.bot_username) and requires_payment
+    return telegram_ui_enabled(config) and requires_payment
 
 
 def build_telegram_connect_url(config: AppConfig, token: str) -> str:
@@ -392,7 +423,8 @@ def render_billing_blocked(
 ) -> HTMLResponse:
     store = get_telegram_store()
     requires_payment = user_requires_payment(store, user.username)
-    telegram_enabled = billing_ui_enabled(config, requires_payment=requires_payment)
+    telegram_enabled = telegram_ui_enabled(config)
+    payment_ui_enabled = billing_ui_enabled(config, requires_payment=requires_payment)
     telegram_linked = False
     if telegram_enabled and store is not None:
         telegram_linked = store.get_link_by_username(user.username) is not None
@@ -404,6 +436,7 @@ def render_billing_blocked(
             "user": user,
             "traffic": safe_get_traffic(config, user),
             "telegram_enabled": telegram_enabled,
+            "payment_ui_enabled": payment_ui_enabled,
             "telegram_linked": telegram_linked,
             "telegram_bot_username": config.telegram.bot_username,
             "telegram_link_url": telegram_link_url,
@@ -568,8 +601,11 @@ def dashboard(
         f"{request.url_for('subscription_clash', token=sub_token)}?format=hiddify"
     )
 
-    telegram_requires_payment = user_requires_payment(_telegram_store, user.username)
-    telegram_enabled = billing_ui_enabled(config, requires_payment=telegram_requires_payment)
+    payment_ui_enabled = billing_ui_enabled(
+        config,
+        requires_payment=user_requires_payment(_telegram_store, user.username),
+    )
+    telegram_enabled = telegram_ui_enabled(config)
     telegram_linked = False
     if telegram_enabled and _telegram_store is not None:
         telegram_linked = _telegram_store.get_link_by_username(user.username) is not None
@@ -589,6 +625,7 @@ def dashboard(
             "clash_profile_url": clash_profile_url,
             "hiddify_subscription_url": hiddify_subscription_url,
             "telegram_enabled": telegram_enabled,
+            "payment_ui_enabled": payment_ui_enabled,
             "telegram_linked": telegram_linked,
             "telegram_bot_username": config.telegram.bot_username,
             "telegram_link_url": None,
@@ -617,12 +654,9 @@ def telegram_link_create(
 
     store = get_telegram_store()
     if store is None:
-        raise HTTPException(status_code=503, detail="Сервис оплаты недоступен")
+        raise HTTPException(status_code=503, detail="Telegram недоступен")
 
-    if not billing_ui_enabled(config, requires_payment=user_requires_payment(store, user.username)):
-        raise HTTPException(status_code=404, detail="Оплата для этого аккаунта не требуется")
-
-    if not config.telegram.enabled or not config.telegram.bot_username:
+    if not telegram_ui_enabled(config):
         raise HTTPException(status_code=404, detail="Telegram-бот не настроен")
 
     token = store.create_link_token(
@@ -649,6 +683,10 @@ def telegram_link_create(
     hiddify_subscription_url = (
         f"{request.url_for('subscription_clash', token=sub_token)}?format=hiddify"
     )
+    payment_ui_enabled = billing_ui_enabled(
+        config,
+        requires_payment=user_requires_payment(store, user.username),
+    )
 
     return templates.TemplateResponse(
         request,
@@ -660,10 +698,8 @@ def telegram_link_create(
             "qr_data_url": make_qr_data_url(client.vless_link),
             "clash_profile_url": clash_profile_url,
             "hiddify_subscription_url": hiddify_subscription_url,
-            "telegram_enabled": billing_ui_enabled(
-                config,
-                requires_payment=user_requires_payment(store, user.username),
-            ),
+            "telegram_enabled": True,
+            "payment_ui_enabled": payment_ui_enabled,
             "telegram_linked": store.get_link_by_username(user.username) is not None,
             "telegram_bot_username": config.telegram.bot_username,
             "telegram_link_url": connect_url,

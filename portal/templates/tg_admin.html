@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Админ-панель</title>
+  <link rel="stylesheet" href="/static/tg-admin.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <main class="app" id="app" hidden>
+    <header class="header">
+      <div><p class="eyebrow">Family VPN</p><h1>Админ-панель</h1></div>
+      <p class="principal" id="principal"></p>
+    </header>
+    <p class="notice" id="notice" role="status"></p>
+    <section class="summary" aria-label="Сводка">
+      <article><span>Активны</span><strong id="summary-active">—</strong></article>
+      <article><span>Требуют оплату</span><strong id="summary-payment">—</strong></article>
+      <article><span>Ожидают</span><strong id="summary-pending">—</strong></article>
+    </section>
+    <nav class="tabs" aria-label="Разделы">
+      <button class="tab is-active" type="button" data-tab="users">Пользователи</button>
+      <button class="tab" type="button" data-tab="requests">Заявки <span id="request-count"></span></button>
+    </nav>
+    <section class="panel" id="users-panel">
+      <label class="search-label" for="user-search">Поиск пользователей</label>
+      <input id="user-search" type="search" placeholder="Имя, логин или профиль" autocomplete="off">
+      <div class="cards" id="users-list"></div>
+    </section>
+    <section class="panel" id="requests-panel" hidden><div class="cards" id="requests-list"></div></section>
+  </main>
+  <main class="outside" id="outside" hidden><p>Откройте панель из Telegram-бота</p></main>
+  <script src="/static/tg-admin.js" defer></script>
+</body>
+</html>

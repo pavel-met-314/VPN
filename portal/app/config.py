@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -41,6 +42,7 @@ class TelegramConfig:
     db_path: Path
     payment: TelegramPaymentConfig
     link_token_ttl_seconds: int = 900
+    admin_mini_app_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,19 @@ def _load_telegram_config(raw: dict[str, Any]) -> TelegramConfig:
     if not isinstance(admin_ids, list):
         admin_ids = []
 
+    admin_mini_app_url = str(tg_raw.get("admin_mini_app_url", "")).strip()
+    if admin_mini_app_url:
+        parsed_mini_app_url = urlparse(admin_mini_app_url)
+        if (
+            parsed_mini_app_url.scheme != "https"
+            or not parsed_mini_app_url.netloc
+            or parsed_mini_app_url.username is not None
+            or parsed_mini_app_url.password is not None
+            or parsed_mini_app_url.query
+            or parsed_mini_app_url.fragment
+        ):
+            raise ValueError("telegram.admin_mini_app_url должен быть HTTPS URL без параметров")
+
     return TelegramConfig(
         enabled=bool(tg_raw.get("enabled", False)),
         bot_token=str(tg_raw.get("bot_token", "")).strip(),
@@ -99,6 +114,7 @@ def _load_telegram_config(raw: dict[str, Any]) -> TelegramConfig:
             instructions=str(payment_raw.get("instructions", "")).strip(),
         ),
         link_token_ttl_seconds=int(tg_raw.get("link_token_ttl_seconds", 900)),
+        admin_mini_app_url=admin_mini_app_url,
     )
 
 

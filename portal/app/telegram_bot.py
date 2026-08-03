@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 from typing import TYPE_CHECKING
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
+from telegram import (
+    BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    Update,
+    WebAppInfo,
+)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -13,6 +25,7 @@ from telegram.ext import (
     filters,
 )
 
+from app.admin_service import AdminPrincipal, AdminService, AdminServiceError
 from app.config import AppConfig, PortalUser
 from app.telegram_store import TelegramStore
 from app.xui_admin import XuiAdmin
@@ -27,6 +40,24 @@ CALLBACK_APPROVE_PREFIX = "pay_ok:"
 CALLBACK_REJECT_PREFIX = "pay_no:"
 BTN_PAID = "Я оплатил"
 BTN_STATUS = "Статус"
+BTN_ADMIN_WHO = "Список"
+BTN_ADMIN_HELP = "Справка админа"
+BTN_ADMIN_MINI_APP = "Админ-панель"
+
+_USER_BOT_COMMANDS = [
+    BotCommand("start", "Старт и клавиатура"),
+    BotCommand("status", "Статус доступа"),
+]
+
+_ADMIN_BOT_COMMANDS = [
+    BotCommand("start", "Админ-режим и кнопки"),
+    BotCommand("status", "Статус (если аккаунт привязан)"),
+    BotCommand("who", "Список пользователей"),
+    BotCommand("pay", "Включить оплату (режет доступ)"),
+    BotCommand("free", "Бесплатный доступ"),
+    BotCommand("extend", "Продлить доступ"),
+    BotCommand("admin", "Справка админа"),
+]
 
 
 class TelegramBotContext:
@@ -61,12 +92,47 @@ class TelegramBotContext:
                 return portal_user
         return None
 
+    def admin_service(self) -> AdminService:
+        return AdminService(
+            config=self.config,
+            store=self.store,
+            xui_ro=self.xui_ro,
+            xui_admin=self.xui_admin,
+        )
+
 
 def _user_keyboard(bot_ctx: TelegramBotContext, username: str) -> ReplyKeyboardMarkup:
     buttons = [BTN_STATUS]
     if bot_ctx.store.get_requires_payment(username):
         buttons.append(BTN_PAID)
     return ReplyKeyboardMarkup([buttons], resize_keyboard=True)
+
+
+def _admin_keyboard(bot_ctx: TelegramBotContext) -> ReplyKeyboardMarkup:
+    rows: list[list[str | KeyboardButton]] = [[BTN_ADMIN_WHO, BTN_ADMIN_HELP]]
+    if bot_ctx.config.telegram.admin_mini_app_url:
+        rows.append(
+            [
+                KeyboardButton(
+                    BTN_ADMIN_MINI_APP,
+                    web_app=WebAppInfo(url=bot_ctx.config.telegram.admin_mini_app_url),
+                )
+            ]
+        )
+    rows.append([BTN_STATUS])
+    return ReplyKeyboardMarkup(
+        rows,
+        resize_keyboard=True,
+    )
+
+
+def _keyboard_for_chat(bot_ctx: TelegramBotContext, chat_id: int) -> ReplyKeyboardMarkup:
+    if bot_ctx.is_admin(chat_id):
+        return _admin_keyboard(bot_ctx)
+    link = bot_ctx.store.get_link_by_chat_id(chat_id)
+    if link is not None:
+        return _user_keyboard(bot_ctx, link.username)
+    return ReplyKeyboardMarkup([[BTN_STATUS]], resize_keyboard=True)
 
 
 def _payment_instructions(config: AppConfig, user: PortalUser) -> str:
@@ -105,6 +171,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
+    if bot_ctx.is_admin(chat_id):
+        await update.message.reply_text(
+            "Админ-режим.\n"
+            "Кнопки: «Список», «Справка админа».\n"
+            "Или команды: /who /pay /free /extend (меню «/»).",
+            reply_markup=_admin_keyboard(bot_ctx),
+        )
+        return
+
     link = bot_ctx.store.get_link_by_chat_id(chat_id)
     if link is None:
         await update.message.reply_text(
@@ -135,13 +210,19 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if update.effective_chat is None or update.message is None:
         return
 
-    text = _build_status_text(bot_ctx, update.effective_chat.id)
+    chat_id = update.effective_chat.id
+    text = _build_status_text(bot_ctx, chat_id)
     if text is None:
+        if bot_ctx.is_admin(chat_id):
+            await update.message.reply_text(
+                "У этого чата нет привязанного портал-аккаунта — личный статус недоступен.\n"
+                "Жми «Список» /who или админ-команды.",
+                reply_markup=_admin_keyboard(bot_ctx),
+            )
+            return
         await update.message.reply_text("Telegram не привязан. Сделай это на портале VPN.")
         return
-    link = bot_ctx.store.get_link_by_chat_id(update.effective_chat.id)
-    username = link.username if link else ""
-    await update.message.reply_text(text, reply_markup=_user_keyboard(bot_ctx, username))
+    await update.message.reply_text(text, reply_markup=_keyboard_for_chat(bot_ctx, chat_id))
 
 
 def _build_status_text(bot_ctx: TelegramBotContext, chat_id: int) -> str | None:
@@ -251,10 +332,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if update.message is None or update.message.text is None:
         return
     text = update.message.text.strip()
-    if text == BTN_PAID:
+    bot_ctx: TelegramBotContext = context.application.bot_data["bot_ctx"]
+    if text == BTN_ADMIN_WHO:
+        await cmd_who(update, context)
+    elif text == BTN_ADMIN_HELP:
+        await cmd_admin_help(update, context)
+    elif text == BTN_PAID:
         await handle_paid_request(update, context)
     elif text == BTN_STATUS:
         await cmd_status(update, context)
+    elif bot_ctx.is_admin(update.effective_chat.id if update.effective_chat else 0):
+        # Неизвестная кнопка/текст — подсказка с админ-клавиатурой
+        if not text.startswith("/"):
+            await update.message.reply_text(
+                "Не понял. Жми «Список» / «Справка админа» или /pay user05",
+                reply_markup=_admin_keyboard(bot_ctx),
+            )
 
 
 async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -271,10 +364,45 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
     if data.startswith(CALLBACK_APPROVE_PREFIX):
         request_id = int(data[len(CALLBACK_APPROVE_PREFIX) :])
-        await _approve_payment(bot_ctx, query, request_id, admin_chat_id)
+        await _approve_payment(bot_ctx, query, request_id, admin_chat_id, update)
     elif data.startswith(CALLBACK_REJECT_PREFIX):
         request_id = int(data[len(CALLBACK_REJECT_PREFIX) :])
-        await _reject_payment(bot_ctx, query, request_id, admin_chat_id)
+        await _reject_payment(bot_ctx, query, request_id, admin_chat_id, update)
+
+
+def _admin_principal(update: Update, admin_chat_id: int) -> AdminPrincipal:
+    user = update.effective_user
+    return AdminPrincipal(
+        telegram_user_id=admin_chat_id,
+        telegram_username=user.username if user else None,
+        display_name=user.full_name if user else str(admin_chat_id),
+        auth_date=0,
+    )
+
+
+def _update_idempotency_key(
+    update: Update,
+    admin_chat_id: int,
+    action: str,
+    target: str,
+) -> str:
+    raw = f"{update.update_id}:{admin_chat_id}:{action}:{target}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _admin_error_message(exc: AdminServiceError) -> str:
+    messages = {
+        "USER_NOT_FOUND": "Пользователь не найден",
+        "REQUEST_NOT_FOUND": "Заявка не найдена",
+        "REQUEST_ALREADY_RESOLVED": "Заявка уже обработана",
+        "REQUEST_BUSY": "Операция уже выполняется",
+        "IDEMPOTENCY_CONFLICT": "Конфликт повторной операции",
+        "XUI_READ_FAILED": "Данные VPN временно недоступны",
+        "XUI_WRITE_FAILED": "Не удалось изменить доступ VPN",
+        "STORE_WRITE_FAILED": "Сервис биллинга временно недоступен",
+        "PARTIAL_FAILURE": "Операция выполнена не полностью",
+    }
+    return messages.get(exc.code, "Не удалось выполнить операцию")
 
 
 async def _approve_payment(
@@ -282,34 +410,19 @@ async def _approve_payment(
     query,
     request_id: int,
     admin_chat_id: int,
+    update: Update,
 ) -> None:
-    req = bot_ctx.store.get_payment_request(request_id)
-    if req is None or req.status != "pending":
-        await query.answer("Заявка уже обработана", show_alert=True)
-        return
-
-    portal_user = bot_ctx.portal_user(req.username)
-    if portal_user is None:
-        await query.answer("Пользователь не найден", show_alert=True)
-        return
-
     try:
-        result = bot_ctx.xui_admin.extend_client(
-            inbound_remark=bot_ctx.resolve_inbound_remark(portal_user),
-            client_email=req.client_email,
-            days=bot_ctx.config.telegram.payment.days,
+        result = await asyncio.to_thread(
+            bot_ctx.admin_service().approve_payment_request,
+            request_id,
+            principal=_admin_principal(update, admin_chat_id),
+            idempotency_key=_update_idempotency_key(
+                update, admin_chat_id, "approve_payment_request", str(request_id)
+            ),
         )
-    except Exception as exc:
-        logger.exception("extend_client failed")
-        await query.answer(f"Ошибка: {exc}", show_alert=True)
-        return
-
-    if not bot_ctx.store.resolve_payment_request(
-        request_id,
-        status="approved",
-        admin_chat_id=admin_chat_id,
-    ):
-        await query.answer("Заявка уже обработана", show_alert=True)
+    except AdminServiceError as exc:
+        await query.answer(_admin_error_message(exc), show_alert=True)
         return
 
     await query.answer("Продлено")
@@ -318,17 +431,13 @@ async def _approve_payment(
             f"{query.message.text}\n\n✅ Продлено до {result.expiry_display}"
         )
 
-    try:
-        await query.get_bot().send_message(
-            chat_id=req.chat_id,
-            text=(
-                f"Оплата подтверждена.\n"
-                f"Доступ продлён до {result.expiry_display}."
-            ),
-            reply_markup=_user_keyboard(bot_ctx, req.username),
+    if not result.replayed:
+        await _notify_linked_user(
+            bot_ctx,
+            query.get_bot(),
+            result.target_username,
+            f"Оплата подтверждена.\nДоступ продлён до {result.expiry_display}.",
         )
-    except Exception:
-        logger.exception("failed to notify user %s", req.chat_id)
 
 
 async def _reject_payment(
@@ -336,32 +445,32 @@ async def _reject_payment(
     query,
     request_id: int,
     admin_chat_id: int,
+    update: Update,
 ) -> None:
-    req = bot_ctx.store.get_payment_request(request_id)
-    if req is None or req.status != "pending":
-        await query.answer("Заявка уже обработана", show_alert=True)
-        return
-
-    if not bot_ctx.store.resolve_payment_request(
-        request_id,
-        status="rejected",
-        admin_chat_id=admin_chat_id,
-    ):
-        await query.answer("Заявка уже обработана", show_alert=True)
+    try:
+        result = await asyncio.to_thread(
+            bot_ctx.admin_service().reject_payment_request,
+            request_id,
+            principal=_admin_principal(update, admin_chat_id),
+            idempotency_key=_update_idempotency_key(
+                update, admin_chat_id, "reject_payment_request", str(request_id)
+            ),
+        )
+    except AdminServiceError as exc:
+        await query.answer(_admin_error_message(exc), show_alert=True)
         return
 
     await query.answer("Отклонено")
     if query.message:
         await query.message.edit_text(f"{query.message.text}\n\n❌ Отклонено")
 
-    try:
-        await query.get_bot().send_message(
-            chat_id=req.chat_id,
-            text="Заявка отклонена. Если оплата прошла — напиши админу.",
-            reply_markup=_user_keyboard(bot_ctx, req.username),
+    if not result.replayed:
+        await _notify_linked_user(
+            bot_ctx,
+            query.get_bot(),
+            result.target_username,
+            "Заявка отклонена. Если оплата прошла — напиши админу.",
         )
-    except Exception:
-        logger.exception("failed to notify user %s", req.chat_id)
 
 
 async def _deny_non_admin(update: Update, bot_ctx: TelegramBotContext) -> bool:
@@ -400,7 +509,10 @@ async def cmd_admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "/pay <user> — требовать оплату (сразу режет доступ)\n"
         "/free <user> — бесплатно без срока\n"
         f"/extend <user> [дни] — продлить (по умолчанию {days})\n"
-        "/admin — эта справка"
+        "/admin — эта справка\n\n"
+        "Кнопки внизу: «Список» = /who, «Справка админа» = /admin.\n"
+        "pay/free/extend — только текстом, нужен аргумент user.",
+        reply_markup=_admin_keyboard(bot_ctx),
     )
 
 
@@ -435,7 +547,7 @@ async def cmd_who(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = "\n".join(lines)
     if len(text) > 4000:
         text = text[:3990] + "\n…"
-    await update.message.reply_text(text)
+    await update.message.reply_text(text, reply_markup=_admin_keyboard(bot_ctx))
 
 
 async def cmd_pay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -446,36 +558,50 @@ async def cmd_pay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     args = context.args or []
     if len(args) != 1:
-        await update.message.reply_text("Использование: /pay <user>")
+        await update.message.reply_text(
+            "Использование: /pay <user>",
+            reply_markup=_admin_keyboard(bot_ctx),
+        )
         return
 
     portal_user = bot_ctx.resolve_user_arg(args[0])
     if portal_user is None:
-        await update.message.reply_text("Пользователь не найден.")
+        await update.message.reply_text(
+            "Пользователь не найден.",
+            reply_markup=_admin_keyboard(bot_ctx),
+        )
         return
 
     try:
-        bot_ctx.xui_admin.expire_client_now(
-            inbound_remark=bot_ctx.resolve_inbound_remark(portal_user),
-            client_email=portal_user.client_email,
+        result = await asyncio.to_thread(
+            bot_ctx.admin_service().require_payment,
+            portal_user.username,
+            principal=_admin_principal(update, update.effective_chat.id),
+            idempotency_key=_update_idempotency_key(
+                update, update.effective_chat.id, "require_payment", portal_user.username
+            ),
         )
-    except Exception as exc:
+    except AdminServiceError as exc:
         logger.exception("admin /pay failed")
-        await update.message.reply_text(f"Ошибка x-ui: {exc}")
+        await update.message.reply_text(
+            f"Ошибка: {_admin_error_message(exc)}",
+            reply_markup=_admin_keyboard(bot_ctx),
+        )
         return
 
-    bot_ctx.store.set_requires_payment(portal_user.username, True)
     await update.message.reply_text(
         f"💸 {portal_user.display_name} ({portal_user.client_email}): "
-        "требуется оплата, доступ отключён до продления."
+        "требуется оплата, доступ отключён до продления.",
+        reply_markup=_admin_keyboard(bot_ctx),
     )
-    await _notify_linked_user(
-        bot_ctx,
-        context.bot,
-        portal_user.username,
-        "Админ включил оплату для твоего аккаунта. "
-        "Доступ приостановлен — оплати и нажми «Я оплатил».",
-    )
+    if not result.replayed:
+        await _notify_linked_user(
+            bot_ctx,
+            context.bot,
+            portal_user.username,
+            "Админ включил оплату для твоего аккаунта. "
+            "Доступ приостановлен — оплати и нажми «Я оплатил».",
+        )
 
 
 async def cmd_free(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -486,35 +612,49 @@ async def cmd_free(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     args = context.args or []
     if len(args) != 1:
-        await update.message.reply_text("Использование: /free <user>")
+        await update.message.reply_text(
+            "Использование: /free <user>",
+            reply_markup=_admin_keyboard(bot_ctx),
+        )
         return
 
     portal_user = bot_ctx.resolve_user_arg(args[0])
     if portal_user is None:
-        await update.message.reply_text("Пользователь не найден.")
+        await update.message.reply_text(
+            "Пользователь не найден.",
+            reply_markup=_admin_keyboard(bot_ctx),
+        )
         return
 
     try:
-        bot_ctx.xui_admin.clear_client_expiry(
-            inbound_remark=bot_ctx.resolve_inbound_remark(portal_user),
-            client_email=portal_user.client_email,
+        result = await asyncio.to_thread(
+            bot_ctx.admin_service().set_free,
+            portal_user.username,
+            principal=_admin_principal(update, update.effective_chat.id),
+            idempotency_key=_update_idempotency_key(
+                update, update.effective_chat.id, "set_free", portal_user.username
+            ),
         )
-    except Exception as exc:
+    except AdminServiceError as exc:
         logger.exception("admin /free failed")
-        await update.message.reply_text(f"Ошибка x-ui: {exc}")
+        await update.message.reply_text(
+            f"Ошибка: {_admin_error_message(exc)}",
+            reply_markup=_admin_keyboard(bot_ctx),
+        )
         return
 
-    bot_ctx.store.set_requires_payment(portal_user.username, False)
     await update.message.reply_text(
         f"🆓 {portal_user.display_name} ({portal_user.client_email}): "
-        "бесплатный доступ без срока."
+        "бесплатный доступ без срока.",
+        reply_markup=_admin_keyboard(bot_ctx),
     )
-    await _notify_linked_user(
-        bot_ctx,
-        context.bot,
-        portal_user.username,
-        "Админ включил бесплатный доступ для твоего аккаунта. VPN снова без срока оплаты.",
-    )
+    if not result.replayed:
+        await _notify_linked_user(
+            bot_ctx,
+            context.bot,
+            portal_user.username,
+            "Админ включил бесплатный доступ для твоего аккаунта. VPN снова без срока оплаты.",
+        )
 
 
 async def cmd_extend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -525,48 +665,78 @@ async def cmd_extend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     args = context.args or []
     if len(args) < 1 or len(args) > 2:
-        await update.message.reply_text("Использование: /extend <user> [дни]")
+        await update.message.reply_text(
+            "Использование: /extend <user> [дни]",
+            reply_markup=_admin_keyboard(bot_ctx),
+        )
         return
 
     portal_user = bot_ctx.resolve_user_arg(args[0])
     if portal_user is None:
-        await update.message.reply_text("Пользователь не найден.")
+        await update.message.reply_text(
+            "Пользователь не найден.",
+            reply_markup=_admin_keyboard(bot_ctx),
+        )
         return
 
     days = bot_ctx.config.telegram.payment.days
-    if len(args) == 2:
-        try:
-            days = int(args[1])
-        except ValueError:
-            await update.message.reply_text("Дни должны быть числом.")
-            return
-        if days <= 0 or days > 3660:
-            await update.message.reply_text("Дни: от 1 до 3660.")
-            return
-
-    try:
-        result = bot_ctx.xui_admin.extend_client(
-            inbound_remark=bot_ctx.resolve_inbound_remark(portal_user),
-            client_email=portal_user.client_email,
-            days=days,
+    if len(args) == 2 and args[1] != str(days):
+        await update.message.reply_text(
+            f"Продление доступно только на {days} дн.",
+            reply_markup=_admin_keyboard(bot_ctx),
         )
-    except Exception as exc:
-        logger.exception("admin /extend failed")
-        await update.message.reply_text(f"Ошибка x-ui: {exc}")
         return
 
-    # Продление вручную обычно значит, что человек на платном тарифе.
-    bot_ctx.store.set_requires_payment(portal_user.username, True)
+    try:
+        result = await asyncio.to_thread(
+            bot_ctx.admin_service().extend_default_period,
+            portal_user.username,
+            principal=_admin_principal(update, update.effective_chat.id),
+            idempotency_key=_update_idempotency_key(
+                update, update.effective_chat.id, "extend_30_days", portal_user.username
+            ),
+        )
+    except AdminServiceError as exc:
+        logger.exception("admin /extend failed")
+        await update.message.reply_text(
+            f"Ошибка: {_admin_error_message(exc)}",
+            reply_markup=_admin_keyboard(bot_ctx),
+        )
+        return
+
     await update.message.reply_text(
         f"✅ {portal_user.display_name} ({portal_user.client_email}): "
-        f"+{days} дн. → до {result.expiry_display}"
+        f"+{days} дн. → до {result.expiry_display}",
+        reply_markup=_admin_keyboard(bot_ctx),
     )
-    await _notify_linked_user(
-        bot_ctx,
-        context.bot,
-        portal_user.username,
-        f"Админ продлил доступ на {days} дн.\nОплачено до: {result.expiry_display}.",
-    )
+    if not result.replayed:
+        await _notify_linked_user(
+            bot_ctx,
+            context.bot,
+            portal_user.username,
+            f"Админ продлил доступ на {days} дн.\nОплачено до: {result.expiry_display}.",
+        )
+
+
+async def _register_bot_commands(application: Application) -> None:
+    """Меню «/» в Telegram: user scope + отдельные команды для каждого admin chat_id."""
+    bot_ctx: TelegramBotContext = application.bot_data["bot_ctx"]
+    try:
+        await application.bot.set_my_commands(
+            _USER_BOT_COMMANDS,
+            scope=BotCommandScopeDefault(),
+        )
+    except Exception:
+        logger.exception("set_my_commands default failed")
+
+    for admin_id in bot_ctx.config.telegram.admin_chat_ids:
+        try:
+            await application.bot.set_my_commands(
+                _ADMIN_BOT_COMMANDS,
+                scope=BotCommandScopeChat(chat_id=admin_id),
+            )
+        except Exception:
+            logger.exception("set_my_commands failed for admin chat_id=%s", admin_id)
 
 
 def build_bot_application(config: AppConfig, store: TelegramStore) -> Application:
@@ -574,6 +744,7 @@ def build_bot_application(config: AppConfig, store: TelegramStore) -> Applicatio
     application = (
         Application.builder()
         .token(config.telegram.bot_token)
+        .post_init(_register_bot_commands)
         .build()
     )
     application.bot_data["bot_ctx"] = bot_ctx

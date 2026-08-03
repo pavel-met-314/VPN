@@ -34,6 +34,8 @@ telegram:
   admin_chat_ids: [123456789]      # chat_id админа (@userinfobot)
   db_path: /var/lib/family-portal/bot.db
   link_token_ttl_seconds: 900      # 15 мин на привязку с портала
+  # HTTPS URL без токенов. Пусто — кнопка «Админ-панель» скрыта.
+  admin_mini_app_url: "https://<portal-host>/portal/tg-admin/"
   payment:
     amount_rub: 400
     days: 30
