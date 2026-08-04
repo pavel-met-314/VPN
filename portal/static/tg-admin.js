@@ -41,6 +41,12 @@
   const newKey = () => window.crypto && crypto.randomUUID
     ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}-tg-admin`;
 
+  function getTelegramInitData() {
+    if (tg && typeof tg.initData === "string" && tg.initData) return tg.initData;
+    const hash = window.location.hash.replace(/^#/, "");
+    return new URLSearchParams(hash).get("tgWebAppData") || "";
+  }
+
   async function api(path, options = {}) {
     const headers = { "X-Telegram-Init-Data": state.initData, ...(options.headers || {}) };
     const response = await fetch(`${apiBase}${path}`, { ...options, headers });
@@ -162,11 +168,13 @@
   search.addEventListener("input", renderUsers);
 
   async function boot() {
-    state.initData = tg && typeof tg.initData === "string" ? tg.initData : "";
+    state.initData = getTelegramInitData();
     if (!state.initData) { outside.hidden = false; return; }
     applyTelegramTheme();
-    tg.ready();
-    tg.expand();
+    if (tg) {
+      tg.ready();
+      tg.expand();
+    }
     app.hidden = false;
     try {
       const me = await api("/me"); // Сначала проверяем серверную Telegram-авторизацию.

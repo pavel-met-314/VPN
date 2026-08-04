@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from importlib.util import find_spec
 from pathlib import Path
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 from fastapi.testclient import TestClient
-from telegram import KeyboardButton
+from telegram import InlineKeyboardMarkup, KeyboardButton
 
 from app.config import AppConfig, MtproxyConfig, PortalUser, TelegramConfig, TelegramPaymentConfig, VisitLogConfig, load_config
-from app.telegram_bot import BTN_ADMIN_MINI_APP, _admin_keyboard, TelegramBotContext
+from app.telegram_bot import (
+    BTN_ADMIN_MINI_APP,
+    TelegramBotContext,
+    _admin_keyboard,
+    _admin_mini_app_keyboard,
+    cmd_admin_help,
+    cmd_start,
+)
 
 
 def make_config(*, mini_app_url: str = "") -> AppConfig:
@@ -33,16 +42,54 @@ def make_config(*, mini_app_url: str = "") -> AppConfig:
 
 
 class TelegramMiniAppUiTest(unittest.TestCase):
-    def test_admin_keyboard_includes_web_app_button_only_when_configured(self) -> None:
-        configured = _admin_keyboard(
-            TelegramBotContext(make_config(mini_app_url="https://vpn.test/portal/tg-admin/"), Mock())
+    def test_admin_mini_app_uses_inline_button_and_reply_keyboard_has_no_web_app(self) -> None:
+        bot_ctx = TelegramBotContext(
+            make_config(mini_app_url="https://vpn.test/portal/tg-admin/"), Mock()
         )
-        buttons = [button for row in configured.keyboard for button in row]
-        mini_app_button = next(button for button in buttons if isinstance(button, KeyboardButton) and button.text == BTN_ADMIN_MINI_APP)
-        self.assertEqual(mini_app_button.web_app.url, "https://vpn.test/portal/tg-admin/")
+        inline = _admin_mini_app_keyboard(bot_ctx)
+        self.assertIsInstance(inline, InlineKeyboardMarkup)
+        self.assertEqual(inline.inline_keyboard[0][0].text, BTN_ADMIN_MINI_APP)
+        self.assertEqual(inline.inline_keyboard[0][0].web_app.url, "https://vpn.test/portal/tg-admin/")
 
-        disabled = _admin_keyboard(TelegramBotContext(make_config(), Mock()))
-        self.assertNotIn(BTN_ADMIN_MINI_APP, [str(button) for row in disabled.keyboard for button in row])
+        reply_buttons = [button for row in _admin_keyboard(bot_ctx).keyboard for button in row]
+        self.assertEqual([button.text for button in reply_buttons], ["Список", "Справка админа", "Статус"])
+        self.assertTrue(all(not isinstance(button, KeyboardButton) or button.web_app is None for button in reply_buttons))
+
+    def test_empty_mini_app_url_does_not_create_inline_button(self) -> None:
+        self.assertIsNone(_admin_mini_app_keyboard(TelegramBotContext(make_config(), Mock())))
+
+    def test_start_and_admin_send_inline_button_only_to_admin(self) -> None:
+        async def run() -> None:
+            store = Mock()
+            admin_ctx = TelegramBotContext(
+                make_config(mini_app_url="https://vpn.test/portal/tg-admin/"), store
+            )
+            admin_message = SimpleNamespace(reply_text=AsyncMock())
+            admin_update = SimpleNamespace(
+                message=admin_message,
+                effective_chat=SimpleNamespace(id=100),
+            )
+            admin_context = SimpleNamespace(
+                args=[], application=SimpleNamespace(bot_data={"bot_ctx": admin_ctx})
+            )
+            await cmd_start(admin_update, admin_context)
+            self.assertEqual(admin_message.reply_text.await_count, 2)
+            self.assertIsInstance(admin_message.reply_text.await_args_list[1].kwargs["reply_markup"], InlineKeyboardMarkup)
+
+            admin_message.reply_text.reset_mock()
+            await cmd_admin_help(admin_update, admin_context)
+            self.assertEqual(admin_message.reply_text.await_count, 2)
+
+            user_message = SimpleNamespace(reply_text=AsyncMock())
+            user_update = SimpleNamespace(
+                message=user_message,
+                effective_chat=SimpleNamespace(id=101),
+            )
+            await cmd_start(user_update, admin_context)
+            self.assertEqual(user_message.reply_text.await_count, 1)
+            self.assertNotIsInstance(user_message.reply_text.await_args.kwargs.get("reply_markup"), InlineKeyboardMarkup)
+
+        asyncio.run(run())
 
     def test_config_loads_https_url_and_rejects_non_https_url(self) -> None:
         base = """

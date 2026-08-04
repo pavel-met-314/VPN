@@ -11,7 +11,6 @@ from telegram import (
     BotCommandScopeDefault,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
     ReplyKeyboardMarkup,
     Update,
     WebAppInfo,
@@ -108,22 +107,26 @@ def _user_keyboard(bot_ctx: TelegramBotContext, username: str) -> ReplyKeyboardM
     return ReplyKeyboardMarkup([buttons], resize_keyboard=True)
 
 
-def _admin_keyboard(bot_ctx: TelegramBotContext) -> ReplyKeyboardMarkup:
-    rows: list[list[str | KeyboardButton]] = [[BTN_ADMIN_WHO, BTN_ADMIN_HELP]]
-    if bot_ctx.config.telegram.admin_mini_app_url:
-        rows.append(
-            [
-                KeyboardButton(
-                    BTN_ADMIN_MINI_APP,
-                    web_app=WebAppInfo(url=bot_ctx.config.telegram.admin_mini_app_url),
-                )
-            ]
-        )
-    rows.append([BTN_STATUS])
+def _admin_keyboard(_: TelegramBotContext) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        rows,
+        [[BTN_ADMIN_WHO, BTN_ADMIN_HELP], [BTN_STATUS]],
         resize_keyboard=True,
     )
+
+
+def _admin_mini_app_keyboard(bot_ctx: TelegramBotContext) -> InlineKeyboardMarkup | None:
+    url = bot_ctx.config.telegram.admin_mini_app_url
+    if not url:
+        return None
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(BTN_ADMIN_MINI_APP, web_app=WebAppInfo(url=url))]]
+    )
+
+
+async def _send_admin_mini_app_button(bot_ctx: TelegramBotContext, message) -> None:
+    keyboard = _admin_mini_app_keyboard(bot_ctx)
+    if keyboard is not None:
+        await message.reply_text("Открыть админ-панель:", reply_markup=keyboard)
 
 
 def _keyboard_for_chat(bot_ctx: TelegramBotContext, chat_id: int) -> ReplyKeyboardMarkup:
@@ -178,6 +181,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "Или команды: /who /pay /free /extend (меню «/»).",
             reply_markup=_admin_keyboard(bot_ctx),
         )
+        await _send_admin_mini_app_button(bot_ctx, update.message)
         return
 
     link = bot_ctx.store.get_link_by_chat_id(chat_id)
@@ -514,6 +518,7 @@ async def cmd_admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "pay/free/extend — только текстом, нужен аргумент user.",
         reply_markup=_admin_keyboard(bot_ctx),
     )
+    await _send_admin_mini_app_button(bot_ctx, update.message)
 
 
 async def cmd_who(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
