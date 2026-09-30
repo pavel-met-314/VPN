@@ -165,7 +165,8 @@ class XuiDatabase:
         )
 
     def get_client_traffic(self, client_email: str) -> ClientTraffic | None:
-        with self._connect() as conn:
+        conn = self._connect()
+        try:
             try:
                 row = conn.execute(
                     """
@@ -176,17 +177,59 @@ class XuiDatabase:
                     """,
                     (client_email,),
                 ).fetchone()
+                inbound_rows = conn.execute(
+                    "SELECT enable, settings FROM inbounds"
+                ).fetchall()
             except sqlite3.OperationalError:
                 return None
+            try:
+                canonical_row = conn.execute(
+                    "SELECT enable, expiry_time FROM clients WHERE email = ? LIMIT 1",
+                    (client_email,),
+                ).fetchone()
+            except sqlite3.OperationalError as exc:
+                if "no such table" not in str(exc).lower():
+                    raise
+                canonical_row = None
+        finally:
+            conn.close()
 
         if row is None:
             return None
+
+        settings_enable: bool | None = None
+        for inbound in inbound_rows:
+            settings = parse_json_field(inbound["settings"])
+            clients = settings.get("clients")
+            if not isinstance(clients, list):
+                continue
+            for client in clients:
+                if not isinstance(client, dict) or client.get("email") != client_email:
+                    continue
+                settings_enable = (
+                    bool(inbound["enable"]) and client.get("enable") is not False
+                )
+                break
+            if settings_enable is not None:
+                break
+
+        traffic_enable = bool(row["enable"]) if row["enable"] is not None else True
+        canonical_enable = (
+            bool(canonical_row["enable"])
+            if canonical_row is not None and canonical_row["enable"] is not None
+            else True
+        )
+        expiry_time = (
+            int(canonical_row["expiry_time"] or 0)
+            if canonical_row is not None
+            else int(row["expiry_time"] or 0)
+        )
 
         return ClientTraffic(
             up=int(row["up"] or 0),
             down=int(row["down"] or 0),
             total_limit=int(row["total"] or 0),
-            expiry_time=int(row["expiry_time"] or 0),
+            expiry_time=expiry_time,
             last_online=int(row["last_online"] or 0),
-            enable=bool(row["enable"]) if row["enable"] is not None else True,
+            enable=traffic_enable and settings_enable is not False and canonical_enable,
         )

@@ -5,6 +5,7 @@ import logging
 import sqlite3
 import subprocess
 import threading
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -40,6 +41,32 @@ class XuiAdmin:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @staticmethod
+    def _update_canonical_client(
+        conn: sqlite3.Connection,
+        *,
+        client_email: str,
+        expiry_ms: int,
+        enable: bool,
+        updated_at_ms: int,
+    ) -> None:
+        """Synchronize 3X-UI 3.3.1+ canonical client state when available."""
+        try:
+            result = conn.execute(
+                """
+                UPDATE clients
+                SET expiry_time = ?, enable = ?, updated_at = ?
+                WHERE email = ?
+                """,
+                (int(expiry_ms), 1 if enable else 0, updated_at_ms, client_email),
+            )
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return
+            raise
+        if result.rowcount != 1:
+            raise LookupError(f"Клиент '{client_email}' не найден в clients")
+
     def _write_client_expiry(
         self,
         *,
@@ -48,7 +75,7 @@ class XuiAdmin:
         expiry_ms: int,
         enable: bool = True,
     ) -> ExtendResult:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute(
                 """
                 SELECT id, settings FROM inbounds WHERE remark = ? LIMIT 1
@@ -88,10 +115,11 @@ class XuiAdmin:
             if traffic_row is None:
                 conn.execute(
                     """
-                    INSERT INTO client_traffics (email, up, down, total, expiry_time, enable)
-                    VALUES (?, 0, 0, 0, ?, ?)
+                    INSERT INTO client_traffics
+                        (inbound_id, email, up, down, total, expiry_time, enable)
+                    VALUES (?, ?, 0, 0, 0, ?, ?)
                     """,
-                    (client_email, int(expiry_ms), enable_int),
+                    (inbound_id, client_email, int(expiry_ms), enable_int),
                 )
             else:
                 conn.execute(
@@ -102,6 +130,13 @@ class XuiAdmin:
                     """,
                     (int(expiry_ms), enable_int, client_email),
                 )
+            self._update_canonical_client(
+                conn,
+                client_email=client_email,
+                expiry_ms=expiry_ms,
+                enable=enable,
+                updated_at_ms=int(datetime.now(GMT3).timestamp() * 1000),
+            )
             conn.commit()
 
         return ExtendResult(
@@ -124,7 +159,7 @@ class XuiAdmin:
         now_ms = int(datetime.now(GMT3).timestamp() * 1000)
         add_ms = days * MS_DAY
 
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute(
                 """
                 SELECT id, settings FROM inbounds WHERE remark = ? LIMIT 1
@@ -167,10 +202,11 @@ class XuiAdmin:
             if traffic_row is None:
                 conn.execute(
                     """
-                    INSERT INTO client_traffics (email, up, down, total, expiry_time, enable)
-                    VALUES (?, 0, 0, 0, ?, 1)
+                    INSERT INTO client_traffics
+                        (inbound_id, email, up, down, total, expiry_time, enable)
+                    VALUES (?, ?, 0, 0, 0, ?, 1)
                     """,
-                    (client_email, new_expiry),
+                    (inbound_id, client_email, new_expiry),
                 )
             else:
                 conn.execute(
@@ -181,6 +217,13 @@ class XuiAdmin:
                     """,
                     (new_expiry, client_email),
                 )
+            self._update_canonical_client(
+                conn,
+                client_email=client_email,
+                expiry_ms=new_expiry,
+                enable=True,
+                updated_at_ms=now_ms,
+            )
             conn.commit()
 
         result = ExtendResult(
@@ -246,7 +289,7 @@ class XuiAdmin:
         )
 
     def _current_expiry_ms(self, *, inbound_remark: str, client_email: str) -> int:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute(
                 "SELECT settings FROM inbounds WHERE remark = ? LIMIT 1",
                 (inbound_remark,),
