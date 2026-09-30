@@ -1,0 +1,5 @@
+<resources>
+    <string name="import_json">Import local JSON</string>
+    <string name="connect">CONNECT</string>
+    <string name="disconnect">DISCONNECT</string>
+</resources>

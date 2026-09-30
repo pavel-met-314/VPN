@@ -1,0 +1,15 @@
+.gradle/
+build/
+app/build/
+local.properties
+app/libs/*.aar
+*.apk
+*.aab
+*.jks
+*.keystore
+*.json
+!gradle/wrapper/gradle-wrapper.properties
+
+.kotlin/
+app/libs/*-sources.jar
+*.log

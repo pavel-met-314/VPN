@@ -9,3 +9,6 @@
 
 # Windows-скрипты оставляем как есть.
 *.ps1       text eol=crlf
+
+# Gradle wrapper runs on Linux and macOS.
+**/gradlew text eol=lf
