@@ -33,6 +33,7 @@ from app.auth import (
     verify_password,
 )
 from app.config import AppConfig, PortalUser, load_config
+from app.client_api import create_client_router
 from app.telegram_bot import build_bot_application
 from app.telegram_store import TelegramStore
 from app.tg_admin import create_tg_admin_router
@@ -91,6 +92,9 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 @lru_cache
 def get_config() -> AppConfig:
     return load_config(CONFIG_PATH)
+
+
+app.include_router(create_client_router(get_config))
 
 
 def get_serializer(config: AppConfig = Depends(get_config)) -> URLSafeTimedSerializer:
