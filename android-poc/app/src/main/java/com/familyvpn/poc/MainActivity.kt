@@ -60,7 +60,7 @@ class MainActivity : Activity() {
         profileView = TextView(this).apply { textSize = 16f }
         stateView = TextView(this).apply { textSize = 20f }
         layout.addView(TextView(this).apply {
-            text = "Family VPN PoC"
+            text = "Family VPN"
             textSize = 24f
         }, row())
         portalUrlField = EditText(this).apply {

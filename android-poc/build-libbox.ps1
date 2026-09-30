@@ -19,8 +19,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $ndk 'source.properties'))) {
     throw 'Android NDK source.properties not found.'
 }
 
-$actualCommit = (& git -C $source rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $expectedCommit) {
+$archiveRevision = Join-Path $source 'SOURCE_COMMIT'
+if (Test-Path -LiteralPath (Join-Path $source '.git')) {
+    $actualCommit = (& git -C $source rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot read sing-box Git revision.' }
+} elseif (Test-Path -LiteralPath $archiveRevision) {
+    $actualCommit = (Get-Content -LiteralPath $archiveRevision -Raw).Trim()
+} else {
+    throw 'Use the pinned Git checkout or the source bundle from the APK release.'
+}
+if ($actualCommit -ne $expectedCommit) {
     throw "Expected sing-box v1.14.2 commit $expectedCommit, got $actualCommit"
 }
 

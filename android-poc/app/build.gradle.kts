@@ -8,11 +8,17 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.familyvpn.poc"
+        applicationId = "com.familyvpn.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-poc"
+        versionCode = 2
+        versionName = "0.1.0-alpha.1"
+    }
+
+    buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".debug"
+        }
     }
 
     compileOptions {
