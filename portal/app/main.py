@@ -208,7 +208,6 @@ def get_hiddify_options() -> dict:
 
 CLASH_RULES_RU_SPLIT = [
     "GEOSITE,private,DIRECT",
-    "GEOSITE,ru,DIRECT",
     "GEOIP,private,DIRECT,no-resolve",
     "GEOIP,ru,DIRECT,no-resolve",
     "MATCH,VPN",
@@ -480,7 +479,6 @@ def clash_profile_response(*, content: str, filename: str) -> Response:
             "Cache-Control": "no-store",
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Profile-Update-Interval": "86400",
-            "Subscription-Userinfo": "upload=0; download=0; total=1073741824; expire=0",
         },
     )
 
