@@ -19,3 +19,9 @@ Thumbs.db
 .vscode/
 __pycache__/
 *.pyc
+
+# barry-cache:start
+.context-state/
+.context-cache/
+.barry-cache/
+# barry-cache:end
