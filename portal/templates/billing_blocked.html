@@ -30,15 +30,17 @@
       </p>
       {% endif %}
 
-      {% if telegram_enabled %}
+      {% if payment_ui_enabled %}
       <h2>Как продлить</h2>
       <p class="muted">Тариф: {{ payment_amount_rub }} ₽ / {{ payment_days }} дн.</p>
       {% if payment_instructions %}
       <p class="muted" style="white-space: pre-line">{{ payment_instructions }}</p>
       {% endif %}
+      {% endif %}
 
+      {% if telegram_enabled %}
       {% if telegram_linked %}
-      <p class="muted">Telegram подключён — открой бота @{{ telegram_bot_username }}, оплати и нажми «Я оплатил».</p>
+      <p class="muted">Telegram подключён — открой бота @{{ telegram_bot_username }}{% if payment_ui_enabled %}, оплати и нажми «Я оплатил»{% endif %}.</p>
       {% else %}
       <form method="post" action="/portal/telegram/link">
         <button type="submit">Привязать Telegram</button>
@@ -54,7 +56,7 @@
         <span id="copy-tg-status" class="muted"></span>
       </p>
       {% endif %}
-      {% else %}
+      {% elif not payment_ui_enabled %}
       <p class="muted">Напиши админу VPN, чтобы продлить доступ.</p>
       {% endif %}
 

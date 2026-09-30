@@ -32,7 +32,8 @@
 
       <p class="muted">Обновлено: {{ updated_at }}</p>
 
-      {% if telegram_enabled %}
+      {% if telegram_enabled or payment_ui_enabled %}
+      {% if payment_ui_enabled %}
       <h2>Оплата</h2>
       {% if traffic %}
       <p class="muted">
@@ -41,8 +42,12 @@
       </p>
       {% endif %}
       <p class="muted">Тариф: {{ payment_amount_rub }} ₽ / {{ payment_days }} дн.</p>
+      {% else %}
+      <h2>Telegram</h2>
+      {% endif %}
+      {% if telegram_enabled %}
       {% if telegram_linked %}
-      <p class="muted">Telegram подключён — открой бота @{{ telegram_bot_username }} → «Статус» или «Я оплатил».</p>
+      <p class="muted">Telegram подключён — открой бота @{{ telegram_bot_username }}{% if payment_ui_enabled %} → «Статус» или «Я оплатил»{% endif %}.</p>
       {% else %}
       <form method="post" action="/portal/telegram/link">
         <button type="submit">Привязать Telegram</button>
@@ -56,6 +61,7 @@
         <a class="btn secondary" href="{{ telegram_link_url }}">Открыть в Telegram</a>
         <span id="copy-tg-status" class="muted"></span>
       </p>
+      {% endif %}
       {% endif %}
       {% endif %}
 
