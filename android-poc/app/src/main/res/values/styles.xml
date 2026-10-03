@@ -1,0 +1,7 @@
+<resources>
+    <style name="FamilyVpnTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#7350E8</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+    </style>
+</resources>

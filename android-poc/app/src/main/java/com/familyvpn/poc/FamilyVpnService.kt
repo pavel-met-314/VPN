@@ -26,6 +26,9 @@ class FamilyVpnService : VpnService(), CommandServerHandler {
     companion object {
         const val ACTION_CONNECT = "com.familyvpn.poc.CONNECT"
         const val ACTION_DISCONNECT = "com.familyvpn.poc.DISCONNECT"
+        const val ACTION_RECONNECT = "com.familyvpn.poc.RECONNECT"
+        const val ACTION_NOTIFICATION = "com.familyvpn.poc.NOTIFICATION"
+        @Volatile internal var running = false
         private const val CHANNEL = "family_vpn_poc"
         private const val NOTIFICATION_ID = 1
     }
@@ -41,6 +44,17 @@ class FamilyVpnService : VpnService(), CommandServerHandler {
                 worker.execute { startVpn() }
             }
             ACTION_DISCONNECT -> worker.execute { stopVpn() }
+            ACTION_RECONNECT -> worker.execute {
+                if (server == null) return@execute
+                // До разрыва существующего соединения проверяем конфигурацию исключений.
+                val valid = runCatching { Libbox.checkConfig(RuntimeConfig.build(this)) }
+                if (valid.isSuccess) {
+                    PocState.set(this, "CONNECTING")
+                    cleanup()
+                    startVpn()
+                } else PocState.set(this, if (running) "CORE_RUNNING" else "FAILED", "BYPASS_CONFLICT")
+            }
+            ACTION_NOTIFICATION -> if (running) startInForeground()
         }
         return START_STICKY
     }
@@ -67,9 +81,7 @@ class FamilyVpnService : VpnService(), CommandServerHandler {
         PocDiagnostics.record(this, "START_ENTER")
         try {
             check(prepare(this) == null) { "VPN permission missing" }
-            val saved = SecureClientStore.load(this)
-            val config = if (saved != null) ClientProfile.buildConfig(saved.profile)
-                else ReferenceConfig.prepare(File(filesDir, "reference-profile.json").readText())
+            val config = RuntimeConfig.build(this)
             SingBoxRuntime.ensureSetup(this)
             Libbox.checkConfig(config)
             PocDiagnostics.record(this, "CONFIG_VALID")
@@ -78,8 +90,10 @@ class FamilyVpnService : VpnService(), CommandServerHandler {
             engine.start()
             PocDiagnostics.record(this, "CORE_STARTING")
             engine.startOrReloadService(config, OverrideOptions())
+            running = true
             // Core startup is not proof of internet or DNS reachability.
             PocState.set(this, "CORE_RUNNING")
+            PingMonitor.refresh(this)
             PocDiagnostics.record(this, "CORE_START", durationMs = SystemClock.elapsedRealtime() - startedAt)
         } catch (e: Exception) {
             Log.w("FamilyVpnPoC", "Connect failed: ${e.javaClass.simpleName}")
@@ -98,6 +112,8 @@ class FamilyVpnService : VpnService(), CommandServerHandler {
     }
 
     private fun cleanup() {
+        running = false
+        PingMonitor.invalidate(this)
         runCatching { server?.closeService() }
         runCatching { server?.close() }
         server = null
@@ -107,7 +123,7 @@ class FamilyVpnService : VpnService(), CommandServerHandler {
 
     internal fun openTun(options: TunOptions): Int {
         check(prepare(this) == null) { "VPN permission revoked" }
-        val builder = Builder().setSession("Family VPN PoC").setMtu(options.mtu)
+        val builder = Builder().setSession("Family VPN").setMtu(options.mtu)
         if (Build.VERSION.SDK_INT >= 29) builder.setMetered(false)
         val v4 = options.inet4Address
         while (v4.hasNext()) v4.next().also { builder.addAddress(it.address(), it.prefix()) }
@@ -159,10 +175,11 @@ class FamilyVpnService : VpnService(), CommandServerHandler {
     }
 
     private fun startInForeground() {
+        val localized = AppPreferences.localized(this)
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             manager.createNotificationChannel(
-                NotificationChannel(CHANNEL, "Family VPN PoC", NotificationManager.IMPORTANCE_LOW),
+                NotificationChannel(CHANNEL, "Family VPN", NotificationManager.IMPORTANCE_LOW),
             )
         }
         val open = PendingIntent.getActivity(
@@ -176,9 +193,9 @@ class FamilyVpnService : VpnService(), CommandServerHandler {
             Notification.Builder(this)
         }
         val notification = builder
-            .setContentTitle("Family VPN PoC")
-            .setContentText("VPN test is running")
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("Family VPN")
+            .setContentText(localized.getString(R.string.vpn_notification))
+            .setSmallIcon(R.drawable.ic_link)
             .setContentIntent(open)
             .setOngoing(true)
             .build()

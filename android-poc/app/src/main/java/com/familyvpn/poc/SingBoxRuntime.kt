@@ -18,8 +18,8 @@ internal object SingBoxRuntime {
             basePath = base.absolutePath
             workingPath = work.absolutePath
             tempPath = temp.absolutePath
-            appVersion = "0.1.0-poc"
-            appMarketingVersion = "0.1.0-poc"
+            appVersion = BuildConfig.VERSION_NAME
+            appMarketingVersion = BuildConfig.VERSION_NAME
             crashReportSource = "android-poc"
             logMaxLines = 50L
         })

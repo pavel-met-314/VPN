@@ -11,8 +11,9 @@ android {
         applicationId = "com.familyvpn.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.0-alpha.1"
+        versionCode = 6
+        versionName = "0.1.0.5"
+        testInstrumentationRunner = "com.familyvpn.poc.ClientSmokeInstrumentation"
     }
 
     buildTypes {
@@ -20,6 +21,11 @@ android {
             applicationIdSuffix = ".debug"
         }
     }
+
+    buildFeatures { buildConfig = true }
+    bundle { language { enableSplit = false } }
+
+    testOptions { unitTests.isReturnDefaultValues = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -37,4 +43,5 @@ android {
 
 dependencies {
     implementation(files("libs/libbox.aar"))
+    testImplementation("junit:junit:4.13.2")
 }

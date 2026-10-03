@@ -15,7 +15,7 @@ internal object PocDiagnostics {
     fun record(context: Context, stage: String, code: String = "OK", durationMs: Long? = null) {
         val record = JSONObject()
             .put("time_ms", System.currentTimeMillis())
-            .put("app", "0.1.0-poc")
+            .put("app", BuildConfig.VERSION_NAME)
             .put("core", runCatching { Libbox.version() }.getOrDefault("unknown"))
             .put("android", Build.VERSION.RELEASE)
             .put("network", networkType(context))
